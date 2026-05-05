@@ -4,9 +4,26 @@ import { HardhatRuntimeEnvironment } from "hardhat/types";
 const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployer, relayer } = await hre.getNamedAccounts();
   const { deploy } = hre.deployments;
+  const network = hre.network.name;
 
   const relayerAddr = process.env.RELAYER_ADDRESS ?? relayer;
-  if (!relayerAddr) throw new Error("RELAYER_ADDRESS missing");
+  if (!relayerAddr) {
+    throw new Error(
+      `RELAYER_ADDRESS missing.\n` +
+        `Create packages/hardhat/.env with:\n` +
+        `  SEPOLIA_RPC_URL=https://sepolia.drpc.org\n` +
+        `  DEPLOYER_PRIVATE_KEY=0x<deployer key>\n` +
+        `  RELAYER_ADDRESS=0x<relayer EOA>\n` +
+        `(Network: ${network})`,
+    );
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(relayerAddr)) {
+    throw new Error(`RELAYER_ADDRESS invalid (got ${relayerAddr}). Must be 0x-prefixed 40-hex Ethereum address.`);
+  }
+
+  console.log(`Deploying HiddenMultisig on ${network}`);
+  console.log(`  deployer = ${deployer}`);
+  console.log(`  relayer  = ${relayerAddr}`);
 
   const result = await deploy("HiddenMultisig", {
     from: deployer,
@@ -15,7 +32,8 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     autoMine: true,
   });
 
-  console.log(`HiddenMultisig deployed at ${result.address}, relayer = ${relayerAddr}`);
+  console.log(`\nHiddenMultisig deployed at ${result.address}`);
+  console.log(`Save this for backend: MULTISIG_ADDRESS=${result.address}`);
 };
 
 export default func;
