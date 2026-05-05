@@ -1,13 +1,5 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import React from "react";
-import NewAccountContainer from "~~/components/NewAccount/NewAccountContainer";
-import { useAccountRealtime } from "~~/hooks";
-
-const NewAccountPage = () => {
-  useAccountRealtime();
-
-  return <NewAccountContainer />;
-};
-
-export default NewAccountPage;
+export default function NewAccountPage() {
+  redirect("/");
+}

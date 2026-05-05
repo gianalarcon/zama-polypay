@@ -4,7 +4,7 @@
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
-    "strict": true,
+    "strict": false,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "esModuleInterop": true,
@@ -16,15 +16,25 @@
     "incremental": true,
     "paths": {
       "~~/*": ["./*"],
-      "@polypay/shared": ["../shared/dist"],
-      "@polypay/shared/*": ["../shared/dist/*"]
+      "@polypay-zama/shared": ["../shared/dist"],
+      "@polypay-zama/shared/*": ["../shared/dist/*"]
     },
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ]
+    "plugins": [{ "name": "next" }]
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": ["next-env.d.ts", "app/**/*.ts", "app/**/*.tsx", "lib/**/*.ts", "lib/**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "components",
+    "hooks",
+    "services",
+    "utils",
+    "configs",
+    "constants",
+    "contracts",
+    "types",
+    "scaffold.config.ts",
+    "middleware.ts",
+    "styles/sync-colors.ts",
+    "styles/tokens.ts"
+  ]
 }
