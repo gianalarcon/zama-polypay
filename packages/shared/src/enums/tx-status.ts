@@ -1,6 +1,0 @@
-export enum TxStatus {
-  PENDING = "PENDING",
-  EXECUTED = "EXECUTED",
-  EXECUTING = "EXECUTING",
-  FAILED = "FAILED",
-}

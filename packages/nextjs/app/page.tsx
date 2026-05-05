@@ -43,6 +43,8 @@ export default function DemoPage() {
 
   useEffect(() => {
     void refresh();
+    const id = setInterval(() => void refresh(), 5000);
+    return () => clearInterval(id);
   }, []);
 
   async function withBusy<T>(label: string, fn: () => Promise<T>): Promise<T | undefined> {
@@ -192,6 +194,11 @@ export default function DemoPage() {
               <div className="font-mono text-sm">
                 #{p.id} <span className="text-zinc-400">/ {p.ptype}</span>
               </div>
+              {p.details && (
+                <pre className="text-xs text-zinc-400 whitespace-pre-wrap break-all">
+                  {JSON.stringify(p.details, null, 2)}
+                </pre>
+              )}
               <div className="text-xs text-zinc-400">
                 attempts={p.approvalAttempts} pending={String(p.decryptionPending)} executed={String(p.executed)} ready=
                 {String(p.ready)}

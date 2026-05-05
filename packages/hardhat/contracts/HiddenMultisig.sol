@@ -164,7 +164,10 @@ contract HiddenMultisig is ZamaEthereumConfig {
 
         eaddress submitted = FHE.fromExternal(encSigner, proof);
 
-        for (uint256 i = 0; i < _owners.length; i++) {
+        // Iterate up to the bitmap snapshot size: owners added AFTER this
+        // proposal was created cannot retroactively approve it.
+        uint256 bitmapLen = p.hasSigned.length;
+        for (uint256 i = 0; i < bitmapLen; i++) {
             if (!isActive[i]) continue;
 
             ebool isMatch = FHE.eq(submitted, _owners[i]);

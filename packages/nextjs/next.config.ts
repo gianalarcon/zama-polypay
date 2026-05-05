@@ -3,7 +3,6 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   devIndicators: false,
-  transpilePackages: ["@polypay-zama/shared"],
   typescript: {
     // Hackathon scope: legacy components/hooks left from the polypay strip are
     // not type-safe; we only build the demo page tree.

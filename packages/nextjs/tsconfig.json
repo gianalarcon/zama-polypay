@@ -15,26 +15,10 @@
     "jsx": "preserve",
     "incremental": true,
     "paths": {
-      "~~/*": ["./*"],
-      "@polypay-zama/shared": ["../shared/dist"],
-      "@polypay-zama/shared/*": ["../shared/dist/*"]
+      "~~/*": ["./*"]
     },
     "plugins": [{ "name": "next" }]
   },
   "include": ["next-env.d.ts", "app/**/*.ts", "app/**/*.tsx", "lib/**/*.ts", "lib/**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": [
-    "node_modules",
-    "components",
-    "hooks",
-    "services",
-    "utils",
-    "configs",
-    "constants",
-    "contracts",
-    "types",
-    "scaffold.config.ts",
-    "middleware.ts",
-    "styles/sync-colors.ts",
-    "styles/tokens.ts"
-  ]
+  "exclude": ["node_modules"]
 }

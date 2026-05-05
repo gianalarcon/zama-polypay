@@ -1,7 +1,9 @@
 import { Injectable, Logger, OnModuleInit, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Contract, JsonRpcProvider, Wallet } from 'ethers';
+import { AbiCoder, Contract, JsonRpcProvider, Wallet, getAddress } from 'ethers';
 import { HIDDEN_MULTISIG_ABI } from './abi';
+
+const PROPOSAL_TYPES = ['Transfer', 'SetThreshold', 'AddSigner', 'RemoveSigner'] as const;
 
 /**
  * Zama relayer service.
@@ -90,16 +92,48 @@ export class ZamaService implements OnModuleInit {
   async getProposal(propId: number) {
     const c = this.readContract();
     const r = await c.getProposal(propId);
+    const ptypeNum = Number(r.ptype);
+    const ptype = PROPOSAL_TYPES[ptypeNum] ?? 'Unknown';
     return {
       id: propId,
-      ptype: ['Transfer', 'SetThreshold', 'AddSigner', 'RemoveSigner'][Number(r.ptype)] ?? 'Unknown',
-      data: r.data,
+      ptype,
+      data: r.data as string,
+      details: this.decodeProposalData(ptype, r.data as string),
       approvalAttempts: Number(r.approvalAttempts),
       decryptionPending: Boolean(r.decryptionPending),
       executed: Boolean(r.executed),
       ready: Boolean(r.ready),
       createdAt: Number(r.createdAt),
     };
+  }
+
+  private decodeProposalData(ptype: string, data: string): Record<string, unknown> | null {
+    if (!data || data === '0x') return null;
+    const coder = AbiCoder.defaultAbiCoder();
+    try {
+      switch (ptype) {
+        case 'Transfer': {
+          const [to, amount, token] = coder.decode(['address', 'uint256', 'address'], data);
+          return { to: getAddress(to), amount: amount.toString(), token: getAddress(token) };
+        }
+        case 'SetThreshold': {
+          const [newT] = coder.decode(['uint8'], data);
+          return { newThreshold: Number(newT) };
+        }
+        case 'AddSigner': {
+          const [handle] = coder.decode(['bytes32'], data);
+          return { encryptedOwnerHandle: handle };
+        }
+        case 'RemoveSigner': {
+          const [idx] = coder.decode(['uint256'], data);
+          return { ownerIndex: Number(idx) };
+        }
+        default:
+          return null;
+      }
+    } catch {
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -177,8 +211,8 @@ export class ZamaService implements OnModuleInit {
 
     const fhevm = await this.getFhevmInstance();
     const dec = await fhevm.publicDecrypt([handle]);
-    const abiEncoded: string = dec.abiEncodedClearValues ?? dec.abiEncodedCleartexts;
-    const decryptionProof: string = dec.decryptionProof;
+    const abiEncoded = dec.abiEncodedClearValues;
+    const decryptionProof = dec.decryptionProof;
     if (!abiEncoded || !decryptionProof) {
       throw new BadRequestException('publicDecrypt did not return cleartexts/proof');
     }
@@ -219,8 +253,10 @@ export class ZamaService implements OnModuleInit {
 
     // Dynamic import keeps the ESM-only relayer SDK out of the CommonJS build graph.
     const mod: any = await import('@zama-fhe/relayer-sdk/node');
-    const factory = mod.createInstance ?? mod.default?.createInstance;
-    const sepoliaConfig = mod.SepoliaConfig ?? mod.default?.SepoliaConfig;
+    const factory: typeof import('@zama-fhe/relayer-sdk/node').createInstance =
+      mod.createInstance ?? mod.default?.createInstance;
+    const sepoliaConfig: typeof import('@zama-fhe/relayer-sdk/node').SepoliaConfig =
+      mod.SepoliaConfig ?? mod.default?.SepoliaConfig;
     if (!factory || !sepoliaConfig) {
       throw new Error('Zama relayer SDK does not expose createInstance / SepoliaConfig');
     }

@@ -221,6 +221,65 @@ describe("HiddenMultisig", function () {
     expect(await multisig.ownersLength()).to.eq(5);
   });
 
+  it("add-signer extends owner set; new owner can approve future proposals", async function () {
+    await signers.deployer.sendTransaction({ to: multisigAddress, value: ethers.parseEther("1") });
+
+    // Propose adding a new owner (re-using `recipient` slot since 5 named owners are already in).
+    const newOwner = signers.recipient;
+    const inp1 = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
+    inp1.addAddress(newOwner.address);
+    const enc1 = await inp1.encrypt();
+    await (await multisig.connect(signers.relayer).proposeAddSigner(enc1.handles[0], enc1.inputProof)).wait();
+
+    for (const owner of [signers.alice, signers.bob, signers.carol]) {
+      await approveAs(multisig, multisigAddress, signers.relayer, owner, 0);
+    }
+    await executeProposal(multisig, signers.relayer, 0);
+
+    expect(await multisig.ownersLength()).to.eq(6);
+    expect(await multisig.activeOwnerCount()).to.eq(6);
+
+    // Future transfer proposal: alice + bob + new owner (3/3 -> ready).
+    await (
+      await multisig.connect(signers.relayer).proposeTransfer(signers.recipient.address, 1n, ethers.ZeroAddress)
+    ).wait();
+    for (const owner of [signers.alice, signers.bob, newOwner]) {
+      await approveAs(multisig, multisigAddress, signers.relayer, owner, 1);
+    }
+    await executeProposal(multisig, signers.relayer, 1);
+
+    const prop = await multisig.getProposal(1);
+    expect(prop.ready).to.eq(true);
+  });
+
+  it("add-signer leaves prior pending proposals unaffected (new owner can't retro-approve)", async function () {
+    // Pending transfer (no approvals yet).
+    await (
+      await multisig.connect(signers.relayer).proposeTransfer(signers.recipient.address, 1n, ethers.ZeroAddress)
+    ).wait();
+
+    // Add a new owner (executes a separate proposal).
+    const newOwner = signers.recipient;
+    const inp = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
+    inp.addAddress(newOwner.address);
+    const enc = await inp.encrypt();
+    await (await multisig.connect(signers.relayer).proposeAddSigner(enc.handles[0], enc.inputProof)).wait();
+    for (const owner of [signers.alice, signers.bob, signers.carol]) {
+      await approveAs(multisig, multisigAddress, signers.relayer, owner, 1);
+    }
+    await executeProposal(multisig, signers.relayer, 1);
+
+    // Try to approve the OLD pending proposal as the new owner: must NOT revert
+    // (bitmap iter is bounded to old length) and must NOT count.
+    await approveAs(multisig, multisigAddress, signers.relayer, newOwner, 0);
+    await approveAs(multisig, multisigAddress, signers.relayer, signers.alice, 0);
+    await approveAs(multisig, multisigAddress, signers.relayer, signers.bob, 0);
+    await executeProposal(multisig, signers.relayer, 0);
+
+    const prop = await multisig.getProposal(0);
+    expect(prop.ready).to.eq(false);
+  });
+
   it("approvals from a soft-removed owner stop counting", async function () {
     await (await multisig.connect(signers.relayer).proposeRemoveSigner(4)).wait();
     for (const owner of [signers.alice, signers.bob, signers.carol]) {

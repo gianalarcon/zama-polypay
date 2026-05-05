@@ -19,10 +19,18 @@ export type WalletState = {
   nextProposalId: number;
 };
 
+export type ProposalDetails =
+  | { to: string; amount: string; token: string }
+  | { newThreshold: number }
+  | { encryptedOwnerHandle: string }
+  | { ownerIndex: number }
+  | null;
+
 export type ProposalState = {
   id: number;
   ptype: "Transfer" | "SetThreshold" | "AddSigner" | "RemoveSigner";
   data: string;
+  details: ProposalDetails;
   approvalAttempts: number;
   decryptionPending: boolean;
   executed: boolean;

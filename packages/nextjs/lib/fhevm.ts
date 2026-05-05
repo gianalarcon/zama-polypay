@@ -1,9 +1,12 @@
+import { bytesToHex } from "viem";
+
 /**
  * Lazy-loaded Zama FHEVM relayer SDK instance for the browser.
  *
  * Wraps `@zama-fhe/relayer-sdk/bundle` so we only load WASM once and we can
  * generate encrypted inputs (handles + ZKPoK proof) bound to (multisig
- * contract, relayer address).
+ * contract, relayer address). Returns hex-encoded strings ready to JSON-post
+ * to the relayer backend.
  */
 let cached: any | null = null;
 
@@ -19,32 +22,33 @@ export async function getFhevmInstance() {
   return cached;
 }
 
+function toHex(value: Uint8Array | string): `0x${string}` {
+  if (typeof value === "string") {
+    return value.startsWith("0x") ? (value as `0x${string}`) : (`0x${value}` as `0x${string}`);
+  }
+  return bytesToHex(value);
+}
+
 export async function encryptAddressFor(
   contractAddress: string,
   callerAddress: string,
   addressToEncrypt: string,
-): Promise<{ handle: string; proof: string }> {
+): Promise<{ handle: `0x${string}`; proof: `0x${string}` }> {
   const fhevm = await getFhevmInstance();
   const input = fhevm.createEncryptedInput(contractAddress, callerAddress);
   input.addAddress(addressToEncrypt);
   const enc = await input.encrypt();
-  return {
-    handle: typeof enc.handles[0] === "string" ? enc.handles[0] : "0x" + Buffer.from(enc.handles[0]).toString("hex"),
-    proof: typeof enc.inputProof === "string" ? enc.inputProof : "0x" + Buffer.from(enc.inputProof).toString("hex"),
-  };
+  return { handle: toHex(enc.handles[0]), proof: toHex(enc.inputProof) };
 }
 
 export async function encryptAddressesFor(
   contractAddress: string,
   callerAddress: string,
   addressesToEncrypt: string[],
-): Promise<{ handles: string[]; proof: string }> {
+): Promise<{ handles: `0x${string}`[]; proof: `0x${string}` }> {
   const fhevm = await getFhevmInstance();
   const input = fhevm.createEncryptedInput(contractAddress, callerAddress);
   for (const a of addressesToEncrypt) input.addAddress(a);
   const enc = await input.encrypt();
-  return {
-    handles: enc.handles.map((h: any) => (typeof h === "string" ? h : "0x" + Buffer.from(h).toString("hex"))),
-    proof: typeof enc.inputProof === "string" ? enc.inputProof : "0x" + Buffer.from(enc.inputProof).toString("hex"),
-  };
+  return { handles: enc.handles.map(toHex), proof: toHex(enc.inputProof) };
 }
