@@ -79,7 +79,14 @@ contract HiddenMultisig is ZamaEthereumConfig {
     }
 
     /// @notice One-shot initialization: register encrypted owner addresses and threshold.
-    function initialize(externalEaddress[] calldata encOwners, bytes calldata proof, uint8 _threshold) external {
+    /// @dev    Restricted to the relayer EOA to block front-running between deploy
+    ///         and init. The encrypted owner set is bound to (this contract,
+    ///         relayer EOA) on the FE side, so only the relayer can submit it.
+    function initialize(
+        externalEaddress[] calldata encOwners,
+        bytes calldata proof,
+        uint8 _threshold
+    ) external onlyRelayer {
         require(!initialized, "already initialized");
         require(encOwners.length > 0 && encOwners.length <= 32, "owners count out of range");
         require(_threshold > 0 && _threshold <= encOwners.length, "threshold out of range");

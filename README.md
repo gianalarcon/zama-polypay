@@ -66,7 +66,7 @@ yarn workspace @polypay-zama/hardhat compile
 yarn workspace @polypay-zama/hardhat test
 ```
 
-12/12 mock-FHEVM tests should pass.
+15/15 mock-FHEVM tests should pass (including the front-run guard on `initialize`).
 
 ### 3. Deploy `HiddenMultisig` to Sepolia
 
@@ -82,6 +82,8 @@ yarn deploy:sepolia
 ```
 
 The deploy script reads `RELAYER_ADDRESS` and bakes it into the immutable `relayer` field on the contract. Save the printed address — you'll need it as `MULTISIG_ADDRESS` for the backend.
+
+> ⚠️ `initialize()` is gated by `onlyRelayer`. After deploying, the relayer EOA (not the deployer) must submit the `initialize` transaction. The Next.js demo's **Initialize Multisig** form does this for you via the backend.
 
 ### 4. Run the backend
 
@@ -139,6 +141,24 @@ Open `http://localhost:3000` and:
 ## Status
 
 Hackathon MVP — not audited, not production-ready. Forked-and-stripped from `Poly-pay/polypay_app`.
+
+## Threat model
+
+The contract is intentionally minimal; the operational model assumes **trust in the relayer**. Production deployments should harden the items below.
+
+| Surface | Trust assumption today | Production hardening |
+|---|---|---|
+| `relayer` EOA | Single hot wallet, immutable. Submits every approve/propose/finalize tx. | Multi-relayer with rotation; HSM/MPC custody; replace via meta-proposal. |
+| `initialize()` | Front-run blocked: `onlyRelayer`. Only the configured relayer can register the encrypted owner set. | Same. Optionally also check that `encOwners.length` matches an off-chain attestation. |
+| `proposeXxx()` | `onlyRelayer`. Anyone can ask the relayer to propose, but the relayer signs the on-chain tx. | Add per-user rate-limits in the backend; sign user requests with EIP-712 to bind intent to wallet. |
+| `approve()` | `onlyRelayer`. Encrypted signer-address comes from FE bound to (contract, relayer). | Same. Relayer should not log encrypted inputs in plaintext logs. |
+| `requestExecute()` | `onlyRelayer`. Marks the encrypted `ready` flag publicly decryptable. | Same. The "threshold met" boolean is intentionally public after this step. |
+| `finalizeExecute()` | Permissionless. Verified entirely by `FHE.checkSignatures` against KMS signatures. | Same. KMS proof binds (handle, cleartext); replay across proposals is impossible. |
+| Coprocessor + KMS | Trust ⌈2/3⌉ honest of 5 coprocessor operators and 9-of-13 KMS nodes (AWS Nitro Enclaves). | Inherits Zama Protocol guarantees; off-chain decryption may stall — surface a UX timeout. |
+| Recipient + amount | Public on Sepolia by design. | Same. If amounts must be hidden too, switch to ConfidentialERC20 + encrypted amounts. |
+| Pending proposals | No expiry / cancel. Storage grows monotonically. | Add `expiresAt` and a `cancelProposal` meta-proposal in a future iteration. |
+
+If the relayer key is compromised, an attacker can spam proposals and front-run `finalizeExecute`, but they still need encrypted approvals from real owner EOAs to clear the threshold check. They cannot drain funds without a real-owner approval round.
 
 ## License
 

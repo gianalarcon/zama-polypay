@@ -65,11 +65,11 @@ describe("HiddenMultisig", function () {
     multisigAddress = await multisig.getAddress();
 
     const owners = [signers.alice, signers.bob, signers.carol, signers.dave, signers.eve];
-    const input = fhevm.createEncryptedInput(multisigAddress, signers.deployer.address);
+    const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
     for (const o of owners) input.addAddress(o.address);
     const enc = await input.encrypt();
 
-    await (await multisig.connect(signers.deployer).initialize(enc.handles, enc.inputProof, 3)).wait();
+    await (await multisig.connect(signers.relayer).initialize(enc.handles, enc.inputProof, 3)).wait();
   });
 
   it("deploys with relayer set and uninitialized state", async function () {
@@ -87,11 +87,27 @@ describe("HiddenMultisig", function () {
     expect(await multisig.activeOwnerCount()).to.eq(5);
   });
 
+  it("blocks initialization from a non-relayer caller (front-run guard)", async function () {
+    const factory = (await ethers.getContractFactory("HiddenMultisig")) as HiddenMultisig__factory;
+    const fresh = (await factory.connect(signers.deployer).deploy(signers.relayer.address)) as HiddenMultisig;
+    const freshAddr = await fresh.getAddress();
+
+    // Eve crafts her own encrypted owner set bound to (contract, Eve).
+    const eve = signers.recipient;
+    const input = fhevm.createEncryptedInput(freshAddr, eve.address);
+    input.addAddress(eve.address);
+    const enc = await input.encrypt();
+
+    await expect(fresh.connect(eve).initialize(enc.handles, enc.inputProof, 1)).to.be.revertedWith("only relayer");
+  });
+
   it("rejects re-initialization", async function () {
-    const input = fhevm.createEncryptedInput(multisigAddress, signers.deployer.address);
+    const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
     input.addAddress(signers.alice.address);
     const enc = await input.encrypt();
-    await expect(multisig.initialize(enc.handles, enc.inputProof, 1)).to.be.revertedWith("already initialized");
+    await expect(
+      multisig.connect(signers.relayer).initialize(enc.handles, enc.inputProof, 1),
+    ).to.be.revertedWith("already initialized");
   });
 
   it("rejects propose calls from non-relayer", async function () {
