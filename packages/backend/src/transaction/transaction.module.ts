@@ -1,0 +1,33 @@
+import { Module } from '@nestjs/common';
+import { TransactionController } from './transaction.controller';
+import { TransactionService } from './transaction.service';
+import { TransactionExecutorService } from './transaction-executor.service';
+import { TransactionReconcilerScheduler } from './transaction-reconciler.scheduler';
+import { ZkVerifyModule } from '@/zkverify/zkverify.module';
+import { DatabaseModule } from '@/database/database.module';
+import { RelayerModule } from '@/relayer-wallet/relayer-wallet.module';
+import { BatchItemModule } from '@/batch-item/batch-item.module';
+import { EventsModule } from '@/events/events.module';
+import { AnalyticsLoggerService } from '@/common/analytics-logger.service';
+// Quest disabled — see app.module.ts.
+// import { QuestModule } from '@/quest/quest.module';
+
+@Module({
+  imports: [
+    DatabaseModule,
+    ZkVerifyModule,
+    RelayerModule,
+    BatchItemModule,
+    EventsModule,
+    // QuestModule,
+  ],
+  controllers: [TransactionController],
+  providers: [
+    TransactionService,
+    TransactionExecutorService,
+    TransactionReconcilerScheduler,
+    AnalyticsLoggerService,
+  ],
+  exports: [TransactionService],
+})
+export class TransactionModule {}

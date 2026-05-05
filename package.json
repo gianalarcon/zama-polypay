@@ -1,0 +1,34 @@
+{
+  "name": "polypay-zama",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Confidential multisig payroll on Sepolia powered by Zama FHE",
+  "license": "MIT",
+  "workspaces": {
+    "packages": [
+      "packages/*"
+    ]
+  },
+  "scripts": {
+    "chain": "yarn workspace @polypay-zama/hardhat chain",
+    "compile": "yarn workspace @polypay-zama/hardhat compile",
+    "deploy": "yarn workspace @polypay-zama/hardhat deploy",
+    "test": "yarn workspace @polypay-zama/hardhat test",
+    "verify": "yarn workspace @polypay-zama/hardhat verify",
+    "start:frontend": "yarn workspace @polypay-zama/frontend dev",
+    "start:backend": "yarn workspace @polypay-zama/backend start:dev",
+    "build": "yarn build:shared && yarn build:backend && yarn build:frontend",
+    "build:shared": "yarn workspace @polypay-zama/shared build",
+    "build:backend": "yarn workspace @polypay-zama/backend build",
+    "build:frontend": "yarn workspace @polypay-zama/frontend build",
+    "lint": "yarn workspace @polypay-zama/frontend lint && yarn workspace @polypay-zama/hardhat lint",
+    "format": "yarn format:shared && yarn format:backend && yarn format:frontend",
+    "format:shared": "yarn workspace @polypay-zama/shared format",
+    "format:backend": "yarn workspace @polypay-zama/backend format",
+    "format:frontend": "yarn workspace @polypay-zama/frontend format"
+  },
+  "packageManager": "yarn@3.2.3",
+  "engines": {
+    "node": ">=20.18.3"
+  }
+}
