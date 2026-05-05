@@ -108,6 +108,10 @@ contract HiddenMultisig is ZamaEthereumConfig {
 
     function proposeSetThreshold(uint8 newThreshold) external onlyRelayer returns (uint256) {
         require(newThreshold > 0, "bad threshold");
+        // Defensive: reject impossible thresholds at propose time so a successful
+        // approval round can never produce a finalize-time revert that wedges the
+        // proposal in `decryptionPending=true`.
+        require(newThreshold <= activeOwnerCount(), "threshold too high");
         bytes memory data = abi.encode(newThreshold);
         return _createProposal(ProposalType.SetThreshold, data);
     }
@@ -118,6 +122,7 @@ contract HiddenMultisig is ZamaEthereumConfig {
         externalEaddress encNewOwner,
         bytes calldata proof
     ) external onlyRelayer returns (uint256) {
+        require(_owners.length < 32, "owners cap reached");
         eaddress newOwner = FHE.fromExternal(encNewOwner, proof);
         FHE.allowThis(newOwner);
         bytes32 handle = FHE.toBytes32(newOwner);
@@ -128,6 +133,8 @@ contract HiddenMultisig is ZamaEthereumConfig {
     function proposeRemoveSigner(uint256 idx) external onlyRelayer returns (uint256) {
         require(idx < _owners.length, "bad index");
         require(isActive[idx], "already inactive");
+        // Defensive: refuse if removal would drop active owners below the threshold.
+        require(activeOwnerCount() > threshold, "would break threshold");
         bytes memory data = abi.encode(idx);
         return _createProposal(ProposalType.RemoveSigner, data);
     }

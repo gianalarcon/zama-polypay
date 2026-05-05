@@ -57,6 +57,9 @@ export const zamaApi = {
   proposeRemoveSigner: (idx: number) =>
     api.post<{ txHash: string; propId: number }>("/zama/proposals/remove-signer", { idx }).then(r => r.data),
 
+  proposeAddSigner: (encNewOwner: string, proof: string) =>
+    api.post<{ txHash: string; propId: number }>("/zama/proposals/add-signer", { encNewOwner, proof }).then(r => r.data),
+
   approve: (id: number, encSigner: string, proof: string) =>
     api.post(`/zama/proposals/${id}/approve`, { encSigner, proof }).then(r => r.data),
 

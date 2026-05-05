@@ -72,7 +72,6 @@ yarn workspace @polypay-zama/hardhat test
 
 ```bash
 cd packages/hardhat
-cp ../../README.md . # placeholder; create .env from your secrets
 cat <<EOF > .env
 SEPOLIA_RPC_URL=https://sepolia.drpc.org
 DEPLOYER_PRIVATE_KEY=0x<funded deployer key>

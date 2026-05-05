@@ -2,7 +2,9 @@
 
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useEffect, useState } from "react";
-import { useAccount } from "wagmi";
+import { formatEther } from "viem";
+import { useAccount, useBalance } from "wagmi";
+import { sepolia } from "wagmi/chains";
 import { ProposalState, RelayerInfo, WalletState, zamaApi } from "~~/lib/api";
 import { encryptAddressFor, encryptAddressesFor } from "~~/lib/fhevm";
 
@@ -25,6 +27,17 @@ export default function DemoPage() {
   const [tferTo, setTferTo] = useState("");
   const [tferAmount, setTferAmount] = useState("");
   const [tferToken, setTferToken] = useState("0x0000000000000000000000000000000000000000");
+
+  // SetThreshold / AddSigner / RemoveSigner
+  const [newThreshold, setNewThreshold] = useState(3);
+  const [newOwnerAddr, setNewOwnerAddr] = useState("");
+  const [removeIdx, setRemoveIdx] = useState(0);
+
+  const multisigBalance = useBalance({
+    address: relayer?.multisig as `0x${string}` | undefined,
+    chainId: sepolia.id,
+    query: { enabled: Boolean(relayer?.multisig), refetchInterval: 10_000 },
+  });
 
   async function refresh() {
     try {
@@ -83,6 +96,22 @@ export default function DemoPage() {
     await withBusy("proposeTransfer", () => zamaApi.proposeTransfer(tferTo, tferAmount, tferToken));
   }
 
+  async function handleProposeSetThreshold() {
+    await withBusy(`proposeSetThreshold(${newThreshold})`, () => zamaApi.proposeSetThreshold(newThreshold));
+  }
+
+  async function handleProposeAddSigner() {
+    if (!relayer || !newOwnerAddr) return;
+    await withBusy("proposeAddSigner", async () => {
+      const { handle, proof } = await encryptAddressFor(relayer.multisig, relayer.relayer, newOwnerAddr);
+      return zamaApi.proposeAddSigner(handle, proof);
+    });
+  }
+
+  async function handleProposeRemoveSigner() {
+    await withBusy(`proposeRemoveSigner(${removeIdx})`, () => zamaApi.proposeRemoveSigner(removeIdx));
+  }
+
   async function handleApprove(propId: number) {
     if (!relayer || !address) return;
     await withBusy(`approve #${propId}`, async () => {
@@ -128,8 +157,15 @@ export default function DemoPage() {
       <Section title="Multisig State">
         <KV label="Initialized" value={wallet ? String(wallet.initialized) : "—"} />
         <KV label="Threshold" value={wallet ? String(wallet.threshold) : "—"} />
-        <KV label="Owners (active / total)" value={wallet ? `${wallet.activeOwnerCount} / ${wallet.ownersLength}` : "—"} />
+        <KV
+          label="Owners (active / total)"
+          value={wallet ? `${wallet.activeOwnerCount} / ${wallet.ownersLength}` : "—"}
+        />
         <KV label="Proposals" value={wallet ? String(wallet.nextProposalId) : "—"} />
+        <KV
+          label="Multisig ETH balance"
+          value={multisigBalance.data ? `${formatEther(multisigBalance.data.value)} ETH` : "—"}
+        />
         <button
           className="mt-2 rounded border border-zinc-700 px-3 py-1 text-sm hover:bg-zinc-800"
           onClick={() => void refresh()}
@@ -172,18 +208,80 @@ export default function DemoPage() {
       )}
 
       {wallet?.initialized && (
-        <Section title="Propose Transfer">
-          <Field label="Recipient" value={tferTo} onChange={setTferTo} placeholder="0xrecipient" />
-          <Field label="Amount (wei or USDC base units)" value={tferAmount} onChange={setTferAmount} placeholder="100000000000000000" />
-          <Field label="Token (0x0000…0 for ETH)" value={tferToken} onChange={setTferToken} />
-          <button
-            disabled={busy}
-            className="rounded bg-blue-600 px-3 py-1 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-            onClick={() => void handleProposeTransfer()}
-          >
-            Propose Transfer
-          </button>
-        </Section>
+        <>
+          <Section title="Propose Transfer">
+            <Field label="Recipient" value={tferTo} onChange={setTferTo} placeholder="0xrecipient" />
+            <Field
+              label="Amount (wei or USDC base units)"
+              value={tferAmount}
+              onChange={setTferAmount}
+              placeholder="100000000000000000"
+            />
+            <Field label="Token (0x0000…0 for ETH)" value={tferToken} onChange={setTferToken} />
+            <button
+              disabled={busy}
+              className="rounded bg-blue-600 px-3 py-1 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              onClick={() => void handleProposeTransfer()}
+            >
+              Propose Transfer
+            </button>
+          </Section>
+
+          <Section title="Propose Set Threshold">
+            <div className="flex items-center gap-2">
+              <label className="text-sm">New threshold:</label>
+              <input
+                type="number"
+                min={1}
+                max={32}
+                className="w-20 rounded bg-zinc-900 p-1 text-sm"
+                value={newThreshold}
+                onChange={e => setNewThreshold(Number(e.target.value))}
+              />
+              <button
+                disabled={busy}
+                className="rounded bg-blue-600 px-3 py-1 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                onClick={() => void handleProposeSetThreshold()}
+              >
+                Propose
+              </button>
+            </div>
+          </Section>
+
+          <Section title="Propose Add Signer">
+            <p className="text-xs text-zinc-400">Owner address gets encrypted client-side before submission.</p>
+            <Field label="New owner address" value={newOwnerAddr} onChange={setNewOwnerAddr} placeholder="0x..." />
+            <button
+              disabled={busy || !newOwnerAddr}
+              className="rounded bg-blue-600 px-3 py-1 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              onClick={() => void handleProposeAddSigner()}
+            >
+              Propose Add Signer
+            </button>
+          </Section>
+
+          <Section title="Propose Remove Signer">
+            <p className="text-xs text-zinc-400">Soft-removes the owner at index `idx` (encrypted address remains, isActive[idx]=false).</p>
+            <div className="flex items-center gap-2">
+              <label className="text-sm">Owner index:</label>
+              <input
+                type="number"
+                min={0}
+                max={wallet ? wallet.ownersLength - 1 : 0}
+                className="w-20 rounded bg-zinc-900 p-1 text-sm"
+                value={removeIdx}
+                onChange={e => setRemoveIdx(Number(e.target.value))}
+              />
+              <button
+                disabled={busy}
+                className="rounded bg-blue-600 px-3 py-1 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                onClick={() => void handleProposeRemoveSigner()}
+              >
+                Propose
+              </button>
+            </div>
+          </Section>
+        </>
       )}
 
       {wallet?.initialized && (
