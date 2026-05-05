@@ -14,6 +14,28 @@ type Signers = {
   recipient: HardhatEthersSigner;
 };
 
+async function approveAs(
+  multisig: HiddenMultisig,
+  multisigAddress: string,
+  relayer: HardhatEthersSigner,
+  ownerWallet: HardhatEthersSigner,
+  propId: number,
+) {
+  const input = fhevm.createEncryptedInput(multisigAddress, relayer.address);
+  input.addAddress(ownerWallet.address);
+  const enc = await input.encrypt();
+  await (await multisig.connect(relayer).approve(propId, enc.handles[0], enc.inputProof)).wait();
+}
+
+async function executeProposal(multisig: HiddenMultisig, relayer: HardhatEthersSigner, propId: number) {
+  await (await multisig.connect(relayer).requestExecute(propId)).wait();
+  const handle = await multisig.getReadyHandle(propId);
+  const dec = await fhevm.publicDecrypt([handle]);
+  await (
+    await multisig.connect(relayer).finalizeExecute(propId, dec.abiEncodedClearValues, dec.decryptionProof)
+  ).wait();
+}
+
 describe("HiddenMultisig", function () {
   let signers: Signers;
   let multisig: HiddenMultisig;
@@ -42,7 +64,6 @@ describe("HiddenMultisig", function () {
     multisig = (await factory.connect(signers.deployer).deploy(signers.relayer.address)) as HiddenMultisig;
     multisigAddress = await multisig.getAddress();
 
-    // Initialize with 5 owners and threshold 3.
     const owners = [signers.alice, signers.bob, signers.carol, signers.dave, signers.eve];
     const input = fhevm.createEncryptedInput(multisigAddress, signers.deployer.address);
     for (const o of owners) input.addAddress(o.address);
@@ -51,7 +72,7 @@ describe("HiddenMultisig", function () {
     await (await multisig.connect(signers.deployer).initialize(enc.handles, enc.inputProof, 3)).wait();
   });
 
-  it("deploys with relayer set and uninitialized state cleared", async function () {
+  it("deploys with relayer set and uninitialized state", async function () {
     const factory = (await ethers.getContractFactory("HiddenMultisig")) as HiddenMultisig__factory;
     const fresh = (await factory.connect(signers.deployer).deploy(signers.relayer.address)) as HiddenMultisig;
     expect(await fresh.relayer()).to.eq(signers.relayer.address);
@@ -73,49 +94,41 @@ describe("HiddenMultisig", function () {
     await expect(multisig.initialize(enc.handles, enc.inputProof, 1)).to.be.revertedWith("already initialized");
   });
 
-  it("only relayer may propose a transfer", async function () {
+  it("rejects propose calls from non-relayer", async function () {
     await expect(
       multisig.connect(signers.alice).proposeTransfer(signers.recipient.address, 1, ethers.ZeroAddress),
     ).to.be.revertedWith("only relayer");
   });
 
   it("creates a transfer proposal with empty bitmap and counter zero", async function () {
-    const tx = await multisig
-      .connect(signers.relayer)
-      .proposeTransfer(signers.recipient.address, ethers.parseEther("0.1"), ethers.ZeroAddress);
-    await tx.wait();
-
-    const prop = await multisig.getProposal(0);
-    expect(prop.ptype).to.eq(0); // Transfer
-    expect(prop.executed).to.eq(false);
-    expect(prop.decryptionPending).to.eq(false);
-    expect(prop.approvalAttempts).to.eq(0);
-  });
-
-  it("executes a transfer when threshold approvals submitted", async function () {
-    // Fund the multisig.
-    await signers.deployer.sendTransaction({ to: multisigAddress, value: ethers.parseEther("1") });
-
-    // Create transfer proposal.
     await (
       await multisig
         .connect(signers.relayer)
         .proposeTransfer(signers.recipient.address, ethers.parseEther("0.1"), ethers.ZeroAddress)
     ).wait();
 
-    // Have alice, bob, carol approve via relayer (threshold = 3).
+    const prop = await multisig.getProposal(0);
+    expect(prop.ptype).to.eq(0);
+    expect(prop.executed).to.eq(false);
+    expect(prop.decryptionPending).to.eq(false);
+    expect(prop.approvalAttempts).to.eq(0);
+  });
+
+  it("executes transfer when threshold approvals submitted", async function () {
+    await signers.deployer.sendTransaction({ to: multisigAddress, value: ethers.parseEther("1") });
+
+    await (
+      await multisig
+        .connect(signers.relayer)
+        .proposeTransfer(signers.recipient.address, ethers.parseEther("0.1"), ethers.ZeroAddress)
+    ).wait();
+
     for (const owner of [signers.alice, signers.bob, signers.carol]) {
-      const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
-      input.addAddress(owner.address);
-      const enc = await input.encrypt();
-      await (await multisig.connect(signers.relayer).approve(0, enc.handles[0], enc.inputProof)).wait();
+      await approveAs(multisig, multisigAddress, signers.relayer, owner, 0);
     }
 
     const balBefore = await ethers.provider.getBalance(signers.recipient.address);
-
-    // Request execution; in mock FHEVM, the callback fires synchronously via plugin.
-    await (await multisig.connect(signers.relayer).requestExecute(0)).wait();
-    await fhevm.awaitDecryptionOracle();
+    await executeProposal(multisig, signers.relayer, 0);
 
     const prop = await multisig.getProposal(0);
     expect(prop.executed).to.eq(true);
@@ -125,7 +138,7 @@ describe("HiddenMultisig", function () {
     expect(balAfter - balBefore).to.eq(ethers.parseEther("0.1"));
   });
 
-  it("does not execute when fewer than threshold owners approve", async function () {
+  it("does not execute when fewer than threshold approve", async function () {
     await signers.deployer.sendTransaction({ to: multisigAddress, value: ethers.parseEther("1") });
 
     await (
@@ -134,17 +147,12 @@ describe("HiddenMultisig", function () {
         .proposeTransfer(signers.recipient.address, ethers.parseEther("0.1"), ethers.ZeroAddress)
     ).wait();
 
-    // Only 2 of 3 required approvals.
     for (const owner of [signers.alice, signers.bob]) {
-      const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
-      input.addAddress(owner.address);
-      const enc = await input.encrypt();
-      await (await multisig.connect(signers.relayer).approve(0, enc.handles[0], enc.inputProof)).wait();
+      await approveAs(multisig, multisigAddress, signers.relayer, owner, 0);
     }
 
     const balBefore = await ethers.provider.getBalance(signers.recipient.address);
-    await (await multisig.connect(signers.relayer).requestExecute(0)).wait();
-    await fhevm.awaitDecryptionOracle();
+    await executeProposal(multisig, signers.relayer, 0);
 
     const prop = await multisig.getProposal(0);
     expect(prop.executed).to.eq(true);
@@ -163,72 +171,50 @@ describe("HiddenMultisig", function () {
         .proposeTransfer(signers.recipient.address, ethers.parseEther("0.1"), ethers.ZeroAddress)
     ).wait();
 
-    // Alice approves 3 times — must NOT meet threshold by herself.
     for (let i = 0; i < 3; i++) {
-      const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
-      input.addAddress(signers.alice.address);
-      const enc = await input.encrypt();
-      await (await multisig.connect(signers.relayer).approve(0, enc.handles[0], enc.inputProof)).wait();
+      await approveAs(multisig, multisigAddress, signers.relayer, signers.alice, 0);
     }
 
-    await (await multisig.connect(signers.relayer).requestExecute(0)).wait();
-    await fhevm.awaitDecryptionOracle();
-
+    await executeProposal(multisig, signers.relayer, 0);
     const prop = await multisig.getProposal(0);
     expect(prop.ready).to.eq(false);
   });
 
-  it("ignores approvals from non-owners (rejects unknown encrypted address)", async function () {
+  it("ignores approvals from non-owners", async function () {
     await (
       await multisig
         .connect(signers.relayer)
         .proposeTransfer(signers.recipient.address, ethers.parseEther("0.1"), ethers.ZeroAddress)
     ).wait();
 
-    // Alice + Bob (valid) + recipient (NOT an owner).
     for (const wallet of [signers.alice, signers.bob, signers.recipient]) {
-      const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
-      input.addAddress(wallet.address);
-      const enc = await input.encrypt();
-      await (await multisig.connect(signers.relayer).approve(0, enc.handles[0], enc.inputProof)).wait();
+      await approveAs(multisig, multisigAddress, signers.relayer, wallet, 0);
     }
 
-    await (await multisig.connect(signers.relayer).requestExecute(0)).wait();
-    await fhevm.awaitDecryptionOracle();
-
-    // Only 2 valid owners approved (recipient does not match any owner).
+    await executeProposal(multisig, signers.relayer, 0);
     const prop = await multisig.getProposal(0);
     expect(prop.ready).to.eq(false);
   });
 
-  it("set-threshold proposal updates threshold after execution", async function () {
+  it("set-threshold proposal updates threshold after execute", async function () {
     await (await multisig.connect(signers.relayer).proposeSetThreshold(4)).wait();
 
     for (const owner of [signers.alice, signers.bob, signers.carol]) {
-      const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
-      input.addAddress(owner.address);
-      const enc = await input.encrypt();
-      await (await multisig.connect(signers.relayer).approve(0, enc.handles[0], enc.inputProof)).wait();
+      await approveAs(multisig, multisigAddress, signers.relayer, owner, 0);
     }
 
-    await (await multisig.connect(signers.relayer).requestExecute(0)).wait();
-    await fhevm.awaitDecryptionOracle();
-
+    await executeProposal(multisig, signers.relayer, 0);
     expect(await multisig.threshold()).to.eq(4);
   });
 
   it("remove-signer proposal soft-deletes via isActive flag", async function () {
-    await (await multisig.connect(signers.relayer).proposeRemoveSigner(4)).wait(); // remove eve (index 4)
+    await (await multisig.connect(signers.relayer).proposeRemoveSigner(4)).wait();
 
     for (const owner of [signers.alice, signers.bob, signers.carol]) {
-      const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
-      input.addAddress(owner.address);
-      const enc = await input.encrypt();
-      await (await multisig.connect(signers.relayer).approve(0, enc.handles[0], enc.inputProof)).wait();
+      await approveAs(multisig, multisigAddress, signers.relayer, owner, 0);
     }
 
-    await (await multisig.connect(signers.relayer).requestExecute(0)).wait();
-    await fhevm.awaitDecryptionOracle();
+    await executeProposal(multisig, signers.relayer, 0);
 
     expect(await multisig.isActive(4)).to.eq(false);
     expect(await multisig.activeOwnerCount()).to.eq(4);
@@ -236,31 +222,19 @@ describe("HiddenMultisig", function () {
   });
 
   it("approvals from a soft-removed owner stop counting", async function () {
-    // First: remove eve.
     await (await multisig.connect(signers.relayer).proposeRemoveSigner(4)).wait();
     for (const owner of [signers.alice, signers.bob, signers.carol]) {
-      const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
-      input.addAddress(owner.address);
-      const enc = await input.encrypt();
-      await (await multisig.connect(signers.relayer).approve(0, enc.handles[0], enc.inputProof)).wait();
+      await approveAs(multisig, multisigAddress, signers.relayer, owner, 0);
     }
-    await (await multisig.connect(signers.relayer).requestExecute(0)).wait();
-    await fhevm.awaitDecryptionOracle();
+    await executeProposal(multisig, signers.relayer, 0);
 
-    // New transfer proposal: alice + bob + eve approve. Eve is inactive => only 2 valid.
     await (
-      await multisig
-        .connect(signers.relayer)
-        .proposeTransfer(signers.recipient.address, 1n, ethers.ZeroAddress)
+      await multisig.connect(signers.relayer).proposeTransfer(signers.recipient.address, 1n, ethers.ZeroAddress)
     ).wait();
     for (const owner of [signers.alice, signers.bob, signers.eve]) {
-      const input = fhevm.createEncryptedInput(multisigAddress, signers.relayer.address);
-      input.addAddress(owner.address);
-      const enc = await input.encrypt();
-      await (await multisig.connect(signers.relayer).approve(1, enc.handles[0], enc.inputProof)).wait();
+      await approveAs(multisig, multisigAddress, signers.relayer, owner, 1);
     }
-    await (await multisig.connect(signers.relayer).requestExecute(1)).wait();
-    await fhevm.awaitDecryptionOracle();
+    await executeProposal(multisig, signers.relayer, 1);
 
     const prop = await multisig.getProposal(1);
     expect(prop.ready).to.eq(false);

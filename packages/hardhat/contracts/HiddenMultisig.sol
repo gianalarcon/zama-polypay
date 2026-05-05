@@ -2,16 +2,16 @@
 pragma solidity ^0.8.27;
 
 import { FHE, ebool, euint8, eaddress, externalEaddress } from "@fhevm/solidity/lib/FHE.sol";
-import { SepoliaConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
+import { ZamaEthereumConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
 
 /// @title HiddenMultisig
 /// @notice Confidential multisig payroll: signer identities are encrypted on-chain
 ///         using Zama FHE. Approvals authenticated by encrypted equality against
-///         the encrypted owner set; threshold met-or-not is decided via an async
-///         KMS decryption callback.
-/// @dev    All approval txs go through a single relayer EOA so that msg.sender does
-///         not leak the signer's wallet.
-contract HiddenMultisig is SepoliaConfig {
+///         the encrypted owner set; threshold met-or-not is decided via off-chain
+///         KMS public decryption verified on-chain by FHE.checkSignatures.
+/// @dev    All approve/finalize txs flow through a single relayer EOA so that
+///         msg.sender does not leak the signer's wallet.
+contract HiddenMultisig is ZamaEthereumConfig {
     // -----------------------------------------------------------------------
     // Types
     // -----------------------------------------------------------------------
@@ -48,7 +48,6 @@ contract HiddenMultisig is SepoliaConfig {
 
     mapping(uint256 => Proposal) private _proposals;
     uint256 public nextPropId;
-    mapping(uint256 => uint256) private _decryptReqToProp;
 
     // -----------------------------------------------------------------------
     // Events
@@ -57,7 +56,7 @@ contract HiddenMultisig is SepoliaConfig {
     event Initialized(uint8 threshold, uint256 ownersCount);
     event ProposalCreated(uint256 indexed propId, ProposalType ptype);
     event Approved(uint256 indexed propId, uint256 attempts);
-    event ExecutionRequested(uint256 indexed propId, uint256 reqId);
+    event ExecutionRequested(uint256 indexed propId, bytes32 readyHandle);
     event Executed(uint256 indexed propId, ProposalType ptype, bool ready);
     event Deposit(address indexed from, uint256 value);
 
@@ -80,9 +79,6 @@ contract HiddenMultisig is SepoliaConfig {
     }
 
     /// @notice One-shot initialization: register encrypted owner addresses and threshold.
-    /// @param encOwners array of encrypted owner addresses (externalEaddress = bytes32 handles)
-    /// @param proof shared ZKPoK proving all encOwners are correctly encrypted
-    /// @param _threshold required approvals to execute a proposal
     function initialize(externalEaddress[] calldata encOwners, bytes calldata proof, uint8 _threshold) external {
         require(!initialized, "already initialized");
         require(encOwners.length > 0 && encOwners.length <= 32, "owners count out of range");
@@ -116,8 +112,8 @@ contract HiddenMultisig is SepoliaConfig {
         return _createProposal(ProposalType.SetThreshold, data);
     }
 
-    /// @dev FHE.fromExternal is run NOW so that the resulting eaddress carries
-    ///      contract-permanent ACL by the time the callback executes _execAddSigner.
+    /// @dev FHE.fromExternal runs at propose time so the resulting eaddress carries
+    ///      contract-permanent ACL by the time finalizeExecute calls _execAddSigner.
     function proposeAddSigner(
         externalEaddress encNewOwner,
         bytes calldata proof
@@ -144,7 +140,6 @@ contract HiddenMultisig is SepoliaConfig {
         p.data = data;
         p.createdAt = block.timestamp;
 
-        // Initialize per-owner encrypted bitmap and approval counter to zero.
         for (uint256 i = 0; i < _owners.length; i++) {
             ebool init = FHE.asEbool(false);
             FHE.allowThis(init);
@@ -160,9 +155,8 @@ contract HiddenMultisig is SepoliaConfig {
     // Approval
     // -----------------------------------------------------------------------
 
-    /// @notice Submit an encrypted signer-address as an approval to a proposal.
-    /// @dev Idempotent: a signer approving twice does NOT increment the counter,
-    ///      because the encrypted bitmap blocks double-counting.
+    /// @notice Submit an encrypted signer-address as an approval for a proposal.
+    /// @dev Idempotent: a signer approving twice does NOT increment the counter.
     function approve(uint256 propId, externalEaddress encSigner, bytes calldata proof) external onlyRelayer {
         Proposal storage p = _proposals[propId];
         require(p.createdAt != 0, "no proposal");
@@ -176,11 +170,9 @@ contract HiddenMultisig is SepoliaConfig {
             ebool isMatch = FHE.eq(submitted, _owners[i]);
             ebool fresh = FHE.and(isMatch, FHE.not(p.hasSigned[i]));
 
-            // Toggle bitmap (FHE.or is idempotent for repeat-sign).
             p.hasSigned[i] = FHE.or(p.hasSigned[i], isMatch);
             FHE.allowThis(p.hasSigned[i]);
 
-            // Increment counter only on first-time match.
             euint8 delta = FHE.select(fresh, FHE.asEuint8(1), FHE.asEuint8(0));
             p.approvalCount = FHE.add(p.approvalCount, delta);
             FHE.allowThis(p.approvalCount);
@@ -191,9 +183,12 @@ contract HiddenMultisig is SepoliaConfig {
     }
 
     // -----------------------------------------------------------------------
-    // Execution (async via KMS decryption callback)
+    // Execution (two-step async via off-chain KMS public decryption)
     // -----------------------------------------------------------------------
 
+    /// @notice Request decryption of the threshold-met flag. The relayer fetches
+    ///         the cleartext and decryption proof off-chain (via Gateway/KMS),
+    ///         then calls finalizeExecute.
     function requestExecute(uint256 propId) external onlyRelayer {
         Proposal storage p = _proposals[propId];
         require(p.createdAt != 0, "no proposal");
@@ -201,34 +196,32 @@ contract HiddenMultisig is SepoliaConfig {
 
         ebool ready = FHE.ge(p.approvalCount, FHE.asEuint8(threshold));
         FHE.allowThis(ready);
+        FHE.makePubliclyDecryptable(ready);
 
         bytes32 handle = FHE.toBytes32(ready);
         p.readyHandle = handle;
         p.decryptionPending = true;
 
-        bytes32[] memory cts = new bytes32[](1);
-        cts[0] = handle;
-        uint256 reqId = FHE.requestDecryption(cts, this.onExecuteCallback.selector);
-        _decryptReqToProp[reqId] = propId;
-
-        emit ExecutionRequested(propId, reqId);
+        emit ExecutionRequested(propId, handle);
     }
 
-    /// @notice KMS decryption callback. Anyone can call; security is enforced by
-    ///         FHE.checkSignatures verifying the cleartext against the bound handle.
-    function onExecuteCallback(uint256 reqId, bytes memory cleartexts, bytes memory decryptionProof) public {
-        uint256 propId = _decryptReqToProp[reqId];
+    /// @notice Finalize execution by submitting the off-chain decryption result
+    ///         along with KMS signatures. checkSignatures reverts on bad proof.
+    /// @param  abiEncodedCleartexts must be `abi.encode(boolReady)`
+    function finalizeExecute(
+        uint256 propId,
+        bytes calldata abiEncodedCleartexts,
+        bytes calldata decryptionProof
+    ) external {
         Proposal storage p = _proposals[propId];
         require(p.decryptionPending && !p.executed, "bad state");
 
-        // Verify KMS signatures bind cleartexts to the recorded handle.
         bytes32[] memory cts = new bytes32[](1);
         cts[0] = p.readyHandle;
-        FHE.checkSignatures(cts, cleartexts, decryptionProof);
+        FHE.checkSignatures(cts, abiEncodedCleartexts, decryptionProof);
 
-        bool ready = abi.decode(cleartexts, (bool));
+        bool ready = abi.decode(abiEncodedCleartexts, (bool));
 
-        // Set state BEFORE external calls (reentrancy guard).
         p.executed = true;
         p.decryptionPending = false;
         p.ready = ready;
@@ -293,6 +286,10 @@ contract HiddenMultisig is SepoliaConfig {
 
     function ownersLength() external view returns (uint256) {
         return _owners.length;
+    }
+
+    function getReadyHandle(uint256 propId) external view returns (bytes32) {
+        return _proposals[propId].readyHandle;
     }
 
     function getProposal(
