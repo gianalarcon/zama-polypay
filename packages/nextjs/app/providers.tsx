@@ -5,6 +5,11 @@ import { RainbowKitProvider, getDefaultConfig } from "@rainbow-me/rainbowkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider, http } from "wagmi";
 import { sepolia } from "wagmi/chains";
+import { CHAIN_ID } from "~~/lib/constants";
+
+if (sepolia.id !== CHAIN_ID) {
+  throw new Error(`CHAIN_ID constant (${CHAIN_ID}) must match wagmi sepolia.id (${sepolia.id})`);
+}
 
 const wagmiConfig = getDefaultConfig({
   appName: "Polypay-Zama",

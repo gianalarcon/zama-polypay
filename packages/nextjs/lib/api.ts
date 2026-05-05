@@ -1,4 +1,5 @@
 import axios from "axios";
+import { ProposalTypeName } from "./constants";
 
 const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000/api";
 
@@ -28,7 +29,7 @@ export type ProposalDetails =
 
 export type ProposalState = {
   id: number;
-  ptype: "Transfer" | "SetThreshold" | "AddSigner" | "RemoveSigner";
+  ptype: ProposalTypeName;
   data: string;
   details: ProposalDetails;
   approvalAttempts: number;
@@ -58,10 +59,13 @@ export const zamaApi = {
     api.post<{ txHash: string; propId: number }>("/zama/proposals/remove-signer", { idx }).then(r => r.data),
 
   proposeAddSigner: (encNewOwner: string, proof: string) =>
-    api.post<{ txHash: string; propId: number }>("/zama/proposals/add-signer", { encNewOwner, proof }).then(r => r.data),
+    api
+      .post<{ txHash: string; propId: number }>("/zama/proposals/add-signer", { encNewOwner, proof })
+      .then(r => r.data),
 
   approve: (id: number, encSigner: string, proof: string) =>
     api.post(`/zama/proposals/${id}/approve`, { encSigner, proof }).then(r => r.data),
 
-  execute: (id: number) => api.post<{ txHash: string; ready: boolean }>(`/zama/proposals/${id}/execute`).then(r => r.data),
+  execute: (id: number) =>
+    api.post<{ txHash: string; ready: boolean }>(`/zama/proposals/${id}/execute`).then(r => r.data),
 };

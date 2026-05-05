@@ -29,26 +29,19 @@ function toHex(value: Uint8Array | string): `0x${string}` {
   return bytesToHex(value);
 }
 
-export async function encryptAddressFor(
+/**
+ * Encrypt a list of Ethereum addresses against (contract, caller) and return
+ * the hex-encoded handles + a single shared ZKPoK proof. Pass a single-element
+ * array for the common one-address case.
+ */
+export async function encryptAddresses(
   contractAddress: string,
   callerAddress: string,
-  addressToEncrypt: string,
-): Promise<{ handle: `0x${string}`; proof: `0x${string}` }> {
-  const fhevm = await getFhevmInstance();
-  const input = fhevm.createEncryptedInput(contractAddress, callerAddress);
-  input.addAddress(addressToEncrypt);
-  const enc = await input.encrypt();
-  return { handle: toHex(enc.handles[0]), proof: toHex(enc.inputProof) };
-}
-
-export async function encryptAddressesFor(
-  contractAddress: string,
-  callerAddress: string,
-  addressesToEncrypt: string[],
+  addresses: readonly string[],
 ): Promise<{ handles: `0x${string}`[]; proof: `0x${string}` }> {
   const fhevm = await getFhevmInstance();
   const input = fhevm.createEncryptedInput(contractAddress, callerAddress);
-  for (const a of addressesToEncrypt) input.addAddress(a);
+  for (const a of addresses) input.addAddress(a);
   const enc = await input.encrypt();
   return { handles: enc.handles.map(toHex), proof: toHex(enc.inputProof) };
 }

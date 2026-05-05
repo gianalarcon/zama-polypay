@@ -23,11 +23,6 @@ const config: HardhatUserConfig = {
   namedAccounts: {
     deployer: { default: 0 },
     relayer: { default: 1 },
-    alice: { default: 2 },
-    bob: { default: 3 },
-    carol: { default: 4 },
-    dave: { default: 5 },
-    eve: { default: 6 },
   },
   networks: {
     hardhat: {

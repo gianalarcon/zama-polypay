@@ -1,9 +1,8 @@
 import { Injectable, Logger, OnModuleInit, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AbiCoder, Contract, JsonRpcProvider, Wallet, getAddress } from 'ethers';
+import { AbiCoder, Contract, JsonRpcProvider, TransactionReceipt, Wallet, getAddress } from 'ethers';
 import { HIDDEN_MULTISIG_ABI } from './abi';
-
-const PROPOSAL_TYPES = ['Transfer', 'SetThreshold', 'AddSigner', 'RemoveSigner'] as const;
+import { CHAIN_ID, PROPOSAL_TYPES, ProposalTypeName } from './constants';
 
 /**
  * Zama relayer service.
@@ -42,7 +41,7 @@ export class ZamaService implements OnModuleInit {
     if (!pk) throw new Error('RELAYER_PRIVATE_KEY missing');
     if (!multi) throw new Error('MULTISIG_ADDRESS missing');
 
-    this.provider = new JsonRpcProvider(rpc, 11155111, { staticNetwork: true });
+    this.provider = new JsonRpcProvider(rpc, CHAIN_ID, { staticNetwork: true });
     this.wallet = new Wallet(pk, this.provider);
     this.multisigAddress = multi;
 
@@ -55,7 +54,7 @@ export class ZamaService implements OnModuleInit {
   // ---------------------------------------------------------------------
 
   getRelayerInfo() {
-    return { relayer: this.wallet.address, multisig: this.multisigAddress, chainId: 11155111 };
+    return { relayer: this.wallet.address, multisig: this.multisigAddress, chainId: CHAIN_ID };
   }
 
   // ---------------------------------------------------------------------
@@ -92,8 +91,7 @@ export class ZamaService implements OnModuleInit {
   async getProposal(propId: number) {
     const c = this.readContract();
     const r = await c.getProposal(propId);
-    const ptypeNum = Number(r.ptype);
-    const ptype = PROPOSAL_TYPES[ptypeNum] ?? 'Unknown';
+    const ptype: ProposalTypeName | 'Unknown' = PROPOSAL_TYPES[Number(r.ptype)] ?? 'Unknown';
     return {
       id: propId,
       ptype,
@@ -147,36 +145,20 @@ export class ZamaService implements OnModuleInit {
     return { txHash: tx.hash, blockNumber: receipt?.blockNumber };
   }
 
-  async proposeTransfer(to: string, amount: string, token: string) {
-    const c = this.writeContract();
-    const tx = await c.proposeTransfer(to, amount, token);
-    const receipt = await tx.wait();
-    const propId = await this.parseProposalCreated(receipt);
-    return { txHash: tx.hash, propId };
+  proposeTransfer(to: string, amount: string, token: string) {
+    return this.submitProposal('proposeTransfer', [to, amount, token]);
   }
 
-  async proposeSetThreshold(newThreshold: number) {
-    const c = this.writeContract();
-    const tx = await c.proposeSetThreshold(newThreshold);
-    const receipt = await tx.wait();
-    const propId = await this.parseProposalCreated(receipt);
-    return { txHash: tx.hash, propId };
+  proposeSetThreshold(newThreshold: number) {
+    return this.submitProposal('proposeSetThreshold', [newThreshold]);
   }
 
-  async proposeAddSigner(encNewOwner: string, proof: string) {
-    const c = this.writeContract();
-    const tx = await c.proposeAddSigner(encNewOwner, proof);
-    const receipt = await tx.wait();
-    const propId = await this.parseProposalCreated(receipt);
-    return { txHash: tx.hash, propId };
+  proposeAddSigner(encNewOwner: string, proof: string) {
+    return this.submitProposal('proposeAddSigner', [encNewOwner, proof]);
   }
 
-  async proposeRemoveSigner(idx: number) {
-    const c = this.writeContract();
-    const tx = await c.proposeRemoveSigner(idx);
-    const receipt = await tx.wait();
-    const propId = await this.parseProposalCreated(receipt);
-    return { txHash: tx.hash, propId };
+  proposeRemoveSigner(idx: number) {
+    return this.submitProposal('proposeRemoveSigner', [idx]);
   }
 
   async approve(propId: number, encSigner: string, proof: string) {
@@ -235,7 +217,19 @@ export class ZamaService implements OnModuleInit {
   // Helpers
   // ---------------------------------------------------------------------
 
-  private async parseProposalCreated(receipt: any): Promise<number> {
+  /**
+   * Submit a propose* call and return the on-chain propId emitted in
+   * ProposalCreated. Single source of truth for the propose-receipt flow.
+   */
+  private async submitProposal(method: string, args: unknown[]): Promise<{ txHash: string; propId: number }> {
+    const c = this.writeContract();
+    const fn = c.getFunction(method);
+    const tx = await fn(...args);
+    const receipt = await tx.wait();
+    return { txHash: tx.hash, propId: this.parseProposalCreated(receipt) };
+  }
+
+  private parseProposalCreated(receipt: TransactionReceipt | null): number {
     const c = this.readContract();
     for (const log of receipt?.logs ?? []) {
       try {
