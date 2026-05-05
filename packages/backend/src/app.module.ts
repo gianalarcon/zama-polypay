@@ -1,62 +1,8 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ThrottlerModule } from '@nestjs/throttler';
-import { ConfigModule } from '@/config/config.module';
-import { IpRestrictMiddleware } from '@/common/middleware/ip-restrict.middleware';
-import { DatabaseModule } from '@/database/database.module';
-import { ZkVerifyModule } from './zkverify/zkverify.module';
-import { TransactionModule } from './transaction/transaction.module';
-import { UserModule } from './user/user.module';
-import { AccountModule } from './account/account.module';
-import { RelayerModule } from './relayer-wallet/relayer-wallet.module';
-import { BatchItemModule } from './batch-item/batch-item.module';
-import { ContactBookModule } from './contact-book/contact-book.module';
-import { EventsModule } from './events/events.module';
-import { NotificationModule } from './notification/notification.module';
-import { AuthModule } from './auth/auth.module';
-import { PriceModule } from './price/price.module';
-import { FeatureRequestModule } from './feature-request/feature-request.module';
-import { AdminModule } from './admin/admin.module';
-// Hidden: Partner account-report endpoint disabled per ops request.
-// import { PartnerModule } from './partner/partner.module';
-// Hidden: Quest + Leaderboard + Reward/Claim flows disabled (FE already hidden in #245).
-// import { QuestModule } from './quest/quest.module';
-// import { RewardModule } from './reward/reward.module';
-import { BalanceAlertModule } from './balance-alert/balance-alert.module';
-import { ScheduleModule } from '@nestjs/schedule';
-import { X402Module } from './x402/x402.module';
-
-const featureX402 = process.env.FEATURE_X402_DEPOSIT === 'true';
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { ZamaModule } from './zama/zama.module';
 
 @Module({
-  imports: [
-    ConfigModule,
-    ThrottlerModule.forRoot({
-      throttlers: [{ ttl: 60_000, limit: 60 }],
-    }),
-    DatabaseModule,
-    ZkVerifyModule,
-    TransactionModule,
-    UserModule,
-    AccountModule,
-    RelayerModule,
-    BatchItemModule,
-    ContactBookModule,
-    EventsModule,
-    NotificationModule,
-    AuthModule,
-    PriceModule,
-    FeatureRequestModule,
-    AdminModule,
-    // PartnerModule,
-    // QuestModule,
-    // RewardModule,
-    BalanceAlertModule,
-    ScheduleModule.forRoot(),
-    ...(featureX402 ? [X402Module] : []),
-  ],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), ZamaModule],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer.apply(IpRestrictMiddleware).forRoutes('*');
-  }
-}
+export class AppModule {}

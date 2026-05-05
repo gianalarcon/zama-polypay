@@ -1,11 +1,12 @@
 {
   "compilerOptions": {
-    "module": "esnext",
+    "module": "commonjs",
     "declaration": true,
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
     "target": "ES2020",
     "sourceMap": true,
     "outDir": "./dist",
@@ -17,14 +18,9 @@
     "strictBindCallApply": false,
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
-    "moduleResolution": "bundler",
-    "paths": {
-      "@/*": ["src/*"],
-      "@/config/*": ["src/config/*"],
-      "@/database/*": ["src/database/*"],
-      "@/common/*": ["src/common/*"],
-      "@polypay/shared": ["../shared/dist"],
-      "@polypay/shared/*": ["../shared/dist/*"]
-    }
-  }
+    "moduleResolution": "node",
+    "resolveJsonModule": true
+  },
+  "include": ["src/main.ts", "src/app.module.ts", "src/zama/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
 }
