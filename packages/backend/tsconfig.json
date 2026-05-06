@@ -19,8 +19,11 @@
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
     "moduleResolution": "node",
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
-  "include": ["src/main.ts", "src/app.module.ts", "src/zama/**/*.ts"],
+  "include": ["src/main.ts", "src/app.module.ts", "src/zama/**/*.ts", "src/database/**/*.ts"],
   "exclude": ["node_modules", "dist", "test"]
 }

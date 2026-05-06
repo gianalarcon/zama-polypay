@@ -1,0 +1,245 @@
+"use client";
+
+import React from "react";
+import Image from "next/image";
+import NetworkBadge from "../Common/NetworkBadge";
+import { MultisigConnectButton } from "../scaffold-eth/RainbowKitCustomConnectButton/MultisigConnectButton";
+import { WrongNetwork } from "../scaffold-eth/RainbowKitCustomConnectButton/WrongNetwork";
+import { useQueryClient } from "@tanstack/react-query";
+import { Address } from "viem";
+import { useAccount, useDisconnect, useWalletClient } from "wagmi";
+import ShinyText from "~~/components/effects/ShinyText";
+import { useMyAccounts, userKeys } from "~~/hooks";
+import { useModalApp } from "~~/hooks/app/useModalApp";
+import { useNetworkGuard } from "~~/hooks/app/useNetworkGuard";
+import { useAppRouter } from "~~/hooks/app/useRouteApp";
+import { useTargetNetwork } from "~~/hooks/scaffold-eth";
+import { useAccountStore, useIdentityStore } from "~~/services/store";
+import { getAccountAvatar, getAvatarByCommitment } from "~~/utils/avatar";
+import { copyToClipboard } from "~~/utils/copy";
+import { getBlockExplorerAddressLink } from "~~/utils/scaffold-eth";
+
+interface AccountSidebarProps {
+  onOpenManageAccounts: () => void;
+}
+
+export default function AccountSidebar({ onOpenManageAccounts }: AccountSidebarProps) {
+  const appRouter = useAppRouter();
+  const { data: walletClient } = useWalletClient();
+  const { targetNetwork } = useTargetNetwork();
+  const { disconnect } = useDisconnect();
+  const { connector } = useAccount();
+  const queryClient = useQueryClient();
+
+  const { openModal } = useModalApp();
+  const { commitment, logout } = useIdentityStore();
+  const { clearCurrentAccount, currentAccount } = useAccountStore();
+  const { data: accounts } = useMyAccounts();
+  // Polypay-Zama: signers are stored encrypted on-chain, not in the account
+  // record returned by /api/zama/accounts. Fall back gracefully when the
+  // signers array is absent.
+  const mySigner = currentAccount?.signers?.find(s => s.commitment === commitment);
+
+  const { isWrongNetwork, targetChainId } = useNetworkGuard();
+
+  const hasAccounts = accounts && accounts.length > 0;
+
+  const handleLogout = () => {
+    logout();
+    clearCurrentAccount();
+    disconnect();
+
+    queryClient.removeQueries({ queryKey: userKeys.all });
+    appRouter.goToDashboardNewAccount();
+  };
+
+  // Not connected state
+  if (!walletClient?.account) {
+    return (
+      <div className="flex justify-center p-3 bg-main-white border border-grey-200 rounded-xl">
+        <div className="flex flex-col gap-1">
+          <Image src="/logo/polypay-icon.svg" width={24} height={24} alt="logo" />
+          <span className="hidden xl:block font-bold">Welcome to Polypay</span>
+          <span className="hidden xl:block text-sm">Connect your wallet to power up your journal.</span>
+          <MultisigConnectButton />
+        </div>
+      </div>
+    );
+  }
+
+  // Wrong network state (per-account guard)
+  if (isWrongNetwork && targetChainId) {
+    return (
+      <div className="flex justify-center p-3 bg-main-white border border-grey-200 rounded-xl">
+        <WrongNetwork />
+      </div>
+    );
+  }
+
+  // Format address
+  const shortAddress = `${walletClient.account.address.slice(0, 4)}...${walletClient.account.address.slice(-3)}`;
+  const shortCommitment = commitment ? `${commitment.slice(0, 4)}...${commitment.slice(-4)}` : null;
+
+  return (
+    <div className="p-3 bg-main-white border border-grey-200 rounded-xl flex flex-col gap-1.5">
+      {/* Account Info Row */}
+      <div
+        className={`
+          flex items-center gap-3 pl-1 pr-3 py-1 rounded-xl cursor-pointer
+          ${hasAccounts ? "bg-pink-25 hover:bg-pink-75" : "bg-violet-25 hover:bg-violet-100"}
+        `}
+        onClick={onOpenManageAccounts}
+      >
+        {/* Avatar */}
+        <div className="relative">
+          <div className="rounded-[9px] flex items-center justify-center">
+            {hasAccounts && currentAccount ? (
+              <Image
+                src={getAccountAvatar(currentAccount, accounts ?? [])}
+                alt="Account"
+                width={40}
+                height={40}
+                className="rounded-[9px]"
+              />
+            ) : (
+              <Image src="/avatars/user-avatar-empty-square.svg" alt="Avatar" width={40} height={40} />
+            )}
+          </div>
+          {hasAccounts && currentAccount?.chainId && (
+            <div className="absolute -bottom-1 -right-1">
+              <NetworkBadge chainId={currentAccount.chainId} size={16} />
+            </div>
+          )}
+        </div>
+
+        {/* Info */}
+        <div className="xl:flex hidden flex-1 flex-col gap-1">
+          {hasAccounts ? (
+            // Have account - 2 lines
+            <>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-medium text-main-pink truncate max-w-[120px] tracking-[-0.04em]">
+                  {currentAccount?.name || "My Account"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Image
+                  src={getAvatarByCommitment(mySigner?.commitment ?? "")}
+                  alt="Signer"
+                  width={12}
+                  height={12}
+                  className="rounded-lg"
+                />
+                <span className="text-xs font-normal text-grey-850 truncate max-w-[120px] tracking-[-0.04em]">
+                  {mySigner?.name ? `${mySigner?.name} (${shortAddress})` : shortAddress}
+                </span>
+              </div>
+            </>
+          ) : (
+            // No account - 1 line only
+            <div className="flex items-center gap-1.5">
+              {/* Wallet Icon from connector */}
+              {connector?.icon && (
+                <Image
+                  src={connector.icon}
+                  alt={connector.name || "Wallet"}
+                  width={16}
+                  height={16}
+                  className="rounded"
+                />
+              )}
+              <span className="text-sm font-medium text-grey-900 tracking-[-0.04em]">{shortAddress}</span>
+              <Image
+                src="/icons/actions/copy-purple.svg"
+                alt="Copy"
+                width={16}
+                height={16}
+                className="opacity-40 cursor-pointer hover:opacity-100"
+                onClick={e => {
+                  e.stopPropagation();
+                  copyToClipboard(walletClient.account.address, "Address copied to clipboard");
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Arrow */}
+        <Image src="/icons/arrows/chevron-right-purple.svg" alt="Expand" width={10} height={10} />
+      </div>
+
+      {/* Commitment Section */}
+      <div className="flex flex-col gap-[3px]">
+        {/* Label */}
+        <span className="xl:block hidden text-sm font-medium text-grey-400 tracking-[-0.04em]">Membership ID</span>
+
+        {/* Commitment Box */}
+        <div
+          className={`
+            h-8 px-2.5 py-1 bg-main-black rounded-lg flex items-center justify-between gap-[5px]
+            ${!commitment ? "cursor-pointer hover:bg-grey-900" : ""}
+          `}
+          onClick={() => !commitment && openModal("generateCommitment")}
+        >
+          {commitment ? (
+            <>
+              {/* Logo mini */}
+              <span className="xl:flex gap-1 hidden">
+                <Image src="/logo/polypay-icon.svg" alt="Polypay" width={9} height={17} />
+                {/* Commitment text */}
+                <ShinyText
+                  text={shortCommitment || ""}
+                  disabled={false}
+                  speed={3}
+                  className="flex-1 text-sm font-medium text-main-white tracking-[-0.06em]"
+                />
+              </span>
+              {/* Copy */}
+              <Image
+                src="/icons/actions/copy-white.svg"
+                alt="Copy"
+                width={16}
+                height={16}
+                className="justify-items-end cursor-pointer hover:opacity-80"
+                onClick={() => copyToClipboard(commitment || "", "Membership ID copied to clipboard")}
+              />
+            </>
+          ) : (
+            <span className="flex-1 xl:block hidden text-sm font-medium text-main-white text-center tracking-[-0.06em]">
+              Generate your membership ID
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="xl:flex hidden items-start gap-2">
+        {/* QR Code */}
+        <div
+          className="w-8 h-8 bg-grey-100 rounded-lg flex items-center justify-center cursor-pointer hover:bg-grey-200"
+          onClick={() => openModal("qrAddressReceiver", { address: walletClient.account.address as Address })}
+        >
+          <Image src="/sidebar/qrcode.svg" alt="QR Code" width={16} height={16} />
+        </div>
+
+        {/* External Link */}
+        <a
+          target="_blank"
+          href={getBlockExplorerAddressLink(targetNetwork, walletClient.account.address as Address)}
+          rel="noopener noreferrer"
+          className="w-8 h-8 bg-grey-100 rounded-lg flex items-center justify-center cursor-pointer hover:bg-grey-200"
+        >
+          <Image src="/sidebar/external.svg" alt="External Link" width={16} height={16} />
+        </a>
+
+        {/* Logout */}
+        <div
+          className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center cursor-pointer hover:bg-red-200"
+          onClick={handleLogout}
+        >
+          <Image src="/sidebar/logout.svg" alt="Logout" width={16} height={16} />
+        </div>
+      </div>
+    </div>
+  );
+}

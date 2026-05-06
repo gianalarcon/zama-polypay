@@ -1,0 +1,32 @@
+import { TxType, TxStatus } from "../enums/index";
+import { Contact } from "./contact-book";
+import { Vote } from "./vote";
+
+export interface SignerData {
+  commitment: string;
+  name?: string | null;
+}
+
+export interface Transaction {
+  id: string;
+  txId: number;
+  type: TxType;
+  status: TxStatus;
+  nonce: number;
+  to?: string;
+  value?: string;
+  tokenAddress?: string;
+  contactId?: string;
+  contact?: Contact;
+  accountAddress: string;
+  signerData?: SignerData[] | null;
+  newThreshold?: number;
+  batchData?: string;
+  createdBy: string;
+  threshold: number;
+  txHash?: string;
+  executedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  votes: Vote[];
+}

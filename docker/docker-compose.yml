@@ -1,0 +1,21 @@
+services:
+  postgres:
+    restart: unless-stopped
+    container_name: polypay-zama-postgres
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: polypay_zama
+      POSTGRES_USER: polypay
+      POSTGRES_PASSWORD: polypay
+    volumes:
+      - polypay_zama_pg_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polypay -d polypay_zama"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  polypay_zama_pg_data:

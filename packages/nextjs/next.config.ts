@@ -1,11 +1,15 @@
 import type { NextConfig } from "next";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   devIndicators: false,
+  transpilePackages: ["@polypay/shared"],
   typescript: {
-    // Hackathon scope: legacy components/hooks left from the polypay strip are
-    // not type-safe; we only build the demo page tree.
     ignoreBuildErrors: true,
   },
   eslint: {
@@ -18,5 +22,13 @@ const nextConfig: NextConfig = {
     return config;
   },
 };
+
+if (process.env.STANDALONE === "true") {
+  nextConfig.output = "standalone";
+  nextConfig.experimental = {
+    // @ts-expect-error - outputFileTracingRoot exists in Next.js 15 but not in type definitions
+    outputFileTracingRoot: path.join(__dirname, "../../"),
+  };
+}
 
 module.exports = nextConfig;

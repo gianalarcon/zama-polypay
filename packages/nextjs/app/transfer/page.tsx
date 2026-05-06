@@ -1,5 +1,6 @@
-import { redirect } from "next/navigation";
+import React from "react";
+import TransferContainer from "~~/components/Transfer/TransferContainer";
 
 export default function TransferPage() {
-  redirect("/");
+  return <TransferContainer />;
 }

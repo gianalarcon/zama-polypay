@@ -1,0 +1,60 @@
+// Polypay-Zama Prisma schema.
+//
+// Stores HiddenMultisig accounts deployed by the relayer + the
+// (commitment, accountId) signer mapping. Note: commitments are 20-byte
+// signature-derived pseudonyms, NOT wallet addresses, so this table
+// does not link to user wallets.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id              String          @id @default(uuid())
+  address         String          @unique
+  name            String?
+  threshold       Int
+  ownersCount     Int
+  chainId         Int             @default(11155111)
+  contractVersion String          @default("polypay-zama-v1")
+  deployTxHash    String?
+  initTxHash      String?
+  createdAt       DateTime        @default(now())
+  signers         AccountSigner[]
+}
+
+model AccountSigner {
+  id         String   @id @default(uuid())
+  accountId  String
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  commitment String
+  name       String?
+  ownerIndex Int
+  isCreator  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@unique([accountId, commitment])
+  @@unique([accountId, ownerIndex])
+  @@index([commitment])
+}
+
+/// Records each successful approve() call, keyed by (account, proposal,
+/// commitment). The contract's encrypted bitmap is the authoritative
+/// validator; this table mirrors approval intent off-chain so the UI can
+/// render "who approved" without forcing a KMS decryption per render.
+model Vote {
+  id              String   @id @default(uuid())
+  accountAddress  String
+  propId          Int
+  commitment      String
+  txHash          String?
+  createdAt       DateTime @default(now())
+
+  @@unique([accountAddress, propId, commitment])
+  @@index([accountAddress, propId])
+}
