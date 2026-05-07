@@ -34,7 +34,7 @@ const StatusContainer: React.FC<StatusContainerProps> = ({
 
   const getSectionTitle = () => {
     if (currentStep === 1) return "1.  Choose network";
-    if (currentStep === 2) return "2.  Basic setup";
+    if (currentStep === 2) return "1.  Basic setup";
     return `3.  Signers & Confirmations(${validSignersToShow.length})`;
   };
 

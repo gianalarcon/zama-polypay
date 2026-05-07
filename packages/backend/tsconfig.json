@@ -24,6 +24,12 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/main.ts", "src/app.module.ts", "src/zama/**/*.ts", "src/database/**/*.ts"],
+  "include": [
+    "src/main.ts",
+    "src/app.module.ts",
+    "src/zama/**/*.ts",
+    "src/database/**/*.ts",
+    "src/price/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist", "test"]
 }

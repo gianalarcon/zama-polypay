@@ -19,18 +19,12 @@ const sectionItems = [
   {
     label: "Quick Access",
     requireAccount: true,
-    menuItems: [
-      { icon: Routes.DASHBOARD.icon, label: Routes.DASHBOARD.title, link: Routes.DASHBOARD.path },
-      { icon: Routes.CONTACT_BOOK.icon, label: Routes.CONTACT_BOOK.title, link: Routes.CONTACT_BOOK.path },
-    ],
+    menuItems: [{ icon: Routes.DASHBOARD.icon, label: Routes.DASHBOARD.title, link: Routes.DASHBOARD.path }],
   },
   {
     label: "Payments",
     requireAccount: true,
-    menuItems: [
-      { icon: Routes.TRANSFER.icon, label: Routes.TRANSFER.title, link: Routes.TRANSFER.path },
-      { icon: Routes.BATCH.icon, label: Routes.BATCH.title, link: Routes.BATCH.path },
-    ],
+    menuItems: [{ icon: Routes.TRANSFER.icon, label: Routes.TRANSFER.title, link: Routes.TRANSFER.path }],
   },
   // Quest & Leaderboard temporarily hidden — kept for future reuse.
   // {
