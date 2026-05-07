@@ -3,14 +3,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { Account, AccountSigner } from "@polypay/shared";
-import { ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~~/components/ui/tooltip";
 import { useModalApp } from "~~/hooks";
 import { useUpdateAccount } from "~~/hooks/api/useAccount";
-import { useTokenPrices } from "~~/hooks/api/usePrice";
-import { useNetworkTokens } from "~~/hooks/app/useNetworkTokens";
-import { usePortfolioValue } from "~~/hooks/app/usePortfolioValue";
-import { useTokenBalances } from "~~/hooks/app/useTokenBalance";
 import { useAccountStore } from "~~/services/store";
 import { getAccountAvatar } from "~~/utils/avatar";
 import { copyToClipboard } from "~~/utils/copy";
@@ -37,26 +33,11 @@ export default function AccountItem({
   const { mutate: updateAccount } = useUpdateAccount();
   const { setCurrentAccount, currentAccount } = useAccountStore();
   const { openModal } = useModalApp();
-  const { tokens } = useNetworkTokens();
 
   // Inline edit state
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(account.name);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Balance state
-  const [showBalance, setShowBalance] = useState(true);
-  const { balances, isLoading: isLoadingBalances } = useTokenBalances(account.address, currentAccount?.chainId);
-  const { getPriceBySymbol, isLoading: isLoadingPrices } = useTokenPrices();
-
-  const isLoading = isLoadingBalances || isLoadingPrices;
-
-  const { totalUsdValue } = usePortfolioValue(tokens, balances, getPriceBySymbol);
-
-  const formattedTotalUsd = totalUsdValue.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
 
   const handleRadioClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -219,31 +200,6 @@ export default function AccountItem({
       {/* Expanded Content */}
       {isExpanded && (
         <>
-          {/* Balance Section */}
-          <div className="flex items-center justify-between px-3">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-1">
-                <span className="text-xs font-normal text-grey-1000 tracking-[-0.04em]">Balance</span>
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    setShowBalance(!showBalance);
-                  }}
-                  className="cursor-pointer"
-                >
-                  {showBalance ? (
-                    <Eye className="w-[16px] h-[16px] opacity-40" />
-                  ) : (
-                    <EyeOff className="w-[16px] h-[16px] opacity-40s" />
-                  )}
-                </button>
-              </div>
-              <span className="text-xl font-medium text-grey-1000 tracking-[-0.04em]">
-                {showBalance ? (isLoading ? "..." : `$${formattedTotalUsd}`) : "*****"}
-              </span>
-            </div>
-          </div>
-
           {/* Signers List */}
           <div className="flex flex-col bg-main-white rounded-lg overflow-hidden">
             {account.signers.map((signer, index) => (

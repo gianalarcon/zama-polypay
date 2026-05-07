@@ -169,4 +169,18 @@ export class AccountService implements OnModuleInit {
     if (!account) throw new NotFoundException(`Account ${address} not found`);
     return account;
   }
+
+  async update(address: string, dto: { name?: string }) {
+    const existing = await (this.prisma.account.findUnique as any)({
+      where: { address },
+    });
+    if (!existing) throw new NotFoundException(`Account ${address} not found`);
+    return (this.prisma.account.update as any)({
+      where: { address },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+      },
+      include: { signers: true },
+    });
+  }
 }

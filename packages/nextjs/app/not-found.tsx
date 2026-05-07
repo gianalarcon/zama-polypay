@@ -5,9 +5,7 @@ import { useAppRouter } from "~~/hooks/app/useRouteApp";
 
 const NAV_BUTTONS = [
   { label: "Dashboard", onClick: "goToDashboard", zIndex: "z-[0]" },
-  { label: "Contact Book", onClick: "goToContactBook", zIndex: "z-[1]" },
   { label: "Transfer", onClick: "goToTransfer", zIndex: "z-[3]" },
-  { label: "Batch", onClick: "goToBatch", zIndex: "z-[5]" },
 ] as const;
 
 const AVATAR_IMAGES = [
@@ -23,17 +21,6 @@ const AVATAR_IMAGES = [
   { src: "/404/avt-blue.svg", width: 131, height: 133, className: "absolute top-[155px] right-[-70px] z-10" },
 ] as const;
 
-const SOCIAL_LINKS = [
-  { icon: "/icons/socials/x-icon.svg", alt: "X", handle: "@PolyPay_finance", url: "https://x.com/poly_pay" },
-  {
-    icon: "/icons/socials/git-icon.svg",
-    alt: "GitHub",
-    handle: "@PolyPay",
-    url: "https://github.com/Poly-pay/polypay_multisig",
-  },
-  // TODO : fill in telegram's URL
-  { icon: "/icons/socials/telegram-icon.svg", alt: "Telegram", handle: "@PolyPay_finance", url: "#" },
-] as const;
 
 export default function NotFound() {
   return (
@@ -67,20 +54,6 @@ export const NotfoundMB = () => {
           ))}
         </div>
         <p className="text-4xl font-extrabold italic text-center">PAGE NOT FOUND</p>
-        <div>
-          {SOCIAL_LINKS.map(({ icon, alt, handle, url }) => (
-            <a
-              key={alt}
-              className="cursor-pointer flex items-center gap-1.5"
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Image src={icon} alt={alt} width={16} height={16} />
-              <span>{handle}</span>
-            </a>
-          ))}
-        </div>
         <div className="grid grid-cols-2 justify-between gap-4 mt-20 pt-3">
           <div className="col-span-1 -mt-3">
             <p className="uppercase text-sm text-main-black font-semibold max-w-36">
@@ -149,20 +122,6 @@ export const NotfoundPC = () => {
             optimize financial transactions.
           </p>
         </div>
-        <aside className="absolute right-20 top-1/2 transform -translate-y-1/2 space-y-2 h-[300px]">
-          {SOCIAL_LINKS.map(({ icon, alt, handle, url }) => (
-            <a
-              key={alt}
-              className="cursor-pointer flex items-center gap-1.5"
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Image src={icon} alt={alt} width={16} height={16} />
-              <span>{handle}</span>
-            </a>
-          ))}
-        </aside>
       </div>
     </div>
   );

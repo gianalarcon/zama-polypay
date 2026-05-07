@@ -5,7 +5,6 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import AccountSidebar from "./AccountSidebar";
 import ManageAccountsSidebar from "./ManageAccountsSidebar";
-import NetworkChooserSidebar from "./NetworkChooserSidebar";
 import { useSwitchChain, useWalletClient } from "wagmi";
 import Routes from "~~/configs/routes.config";
 import { useMyAccounts } from "~~/hooks";
@@ -157,14 +156,7 @@ export default function Sidebar() {
   const { data: walletClient } = useWalletClient();
   const { currentAccount, setCurrentAccount } = useAccountStore();
   const { switchChainAsync } = useSwitchChain();
-  const {
-    isManageAccountsOpen,
-    isNetworkChooserOpen,
-    openNetworkChooser,
-    closeManageAccounts,
-    closeNetworkChooser,
-    openManageAccountsForChain,
-  } = useSidebarStore();
+  const { isManageAccountsOpen, closeManageAccounts, openManageAccountsForChain } = useSidebarStore();
 
   // Manage Accounts Sidebar state
   const selectedAccountId = currentAccount?.id || accounts[0]?.id || "";
@@ -187,12 +179,13 @@ export default function Sidebar() {
   };
 
   const handleOpenManageAccounts = () => {
-    openNetworkChooser();
+    // Polypay-Zama: Sepolia is the only supported chain, so we skip the
+    // network-chooser step and go straight to the accounts list.
+    openManageAccountsForChain(null);
   };
 
   const handleCloseAllSidebars = () => {
     closeManageAccounts();
-    closeNetworkChooser();
   };
 
   const handleSelectAccount = async (accountId: string) => {
@@ -216,10 +209,6 @@ export default function Sidebar() {
   const handleCreateAccount = () => {
     router.goToDashboardNewAccount();
     closeManageAccounts();
-  };
-
-  const handleSelectNetwork = (chainId: number | null) => {
-    openManageAccountsForChain(chainId ?? null);
   };
 
   return (
@@ -288,14 +277,10 @@ export default function Sidebar() {
       </div>
 
       {/* Invisible backdrop for click outside to close */}
-      {(isManageAccountsOpen || isNetworkChooserOpen) && (
-        <div className="fixed inset-0 z-20" onClick={handleCloseAllSidebars} />
-      )}
+      {isManageAccountsOpen && <div className="fixed inset-0 z-20" onClick={handleCloseAllSidebars} />}
 
-      {/* Network chooser sidebar */}
-      <NetworkChooserSidebar isOpen={isNetworkChooserOpen} accounts={accounts} onSelectNetwork={handleSelectNetwork} />
-
-      {/* Manage accounts sidebar */}
+      {/* Manage accounts sidebar (Polypay-Zama drops the NetworkChooser step
+          because Sepolia is the only supported chain). */}
       <ManageAccountsSidebar
         isOpen={isManageAccountsOpen}
         onClose={handleCloseAllSidebars}
@@ -304,7 +289,7 @@ export default function Sidebar() {
         onSelectAccount={handleSelectAccount}
         onCreateAccount={handleCreateAccount}
         isLoading={isLoadingAccounts}
-        hasNetworkChooser={isNetworkChooserOpen}
+        hasNetworkChooser={false}
       />
     </div>
   );

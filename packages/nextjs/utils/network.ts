@@ -9,8 +9,8 @@ const SEPOLIA_CHAIN_ID = 11155111;
 const NETWORK_META_BY_CHAIN_ID: Record<number, NetworkMeta> = {
   [SEPOLIA_CHAIN_ID]: {
     name: "Sepolia",
-    icon: "/token/zen.svg",
-    badge: "/token/zen.svg",
+    icon: "/token/eth.svg",
+    badge: "/token/eth.svg",
   },
 };
 

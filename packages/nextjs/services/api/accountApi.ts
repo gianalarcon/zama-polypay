@@ -18,7 +18,8 @@ export const accountApi = {
   },
 
   update: async (address: string, dto: UpdateAccountDto): Promise<Account> => {
-    const { data } = await apiClient.patch<Account>(API_ENDPOINTS.accounts.byAddress(address), dto);
+    // Polypay-Zama backend exposes the multisig account at /api/zama/accounts/:address.
+    const { data } = await apiClient.patch<Account>(`/api/zama/accounts/${address}`, dto);
     return data;
   },
 };
