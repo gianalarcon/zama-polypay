@@ -43,6 +43,7 @@ type ZamaProposal = {
   executed: boolean;
   ready: boolean;
   createdAt: number;
+  executeTxHash?: string | null;
 };
 
 type ZamaAccount = {
@@ -60,9 +61,22 @@ const ZAMA_TO_TX_TYPE: Record<ZamaProposal["ptype"], TxType> = {
   RemoveSigner: TxType.REMOVE_SIGNER,
 };
 
-function mapStatus(p: ZamaProposal): TxStatus {
+function mapStatus(p: ZamaProposal, account: ZamaAccount | null, dbVotes: ZamaVote[]): TxStatus {
   if (p.executed) return p.ready ? TxStatus.EXECUTED : TxStatus.REJECTED;
   if (p.decryptionPending) return TxStatus.APPROVED; // waiting for decrypt
+
+  // Polypay parity: a proposal becomes FAILED off-chain when remaining
+  // signers + approvals already received cannot reach the threshold (e.g.
+  // someone explicitly denied). The on-chain proposal stays PENDING but
+  // the dashboard renders it as Denied.
+  if (account) {
+    const totalSigners = account.signers.length;
+    const approveCount = dbVotes.filter(v => v.voteType === "APPROVE").length;
+    const totalVoted = dbVotes.length;
+    const remaining = totalSigners - totalVoted;
+    if (approveCount + remaining < account.threshold) return TxStatus.FAILED;
+  }
+
   return TxStatus.PENDING;
 }
 
@@ -80,6 +94,7 @@ type ZamaVote = {
   accountAddress: string;
   propId: number;
   commitment: string;
+  voteType: "APPROVE" | "DENY";
   txHash: string | null;
   createdAt: string;
 };
@@ -95,7 +110,7 @@ async function fetchVotes(address: string, propId: number): Promise<ZamaVote[]> 
 
 function proposalToTx(p: ZamaProposal, account: ZamaAccount | null, dbVotes: ZamaVote[] = []): Transaction {
   const ptype = ZAMA_TO_TX_TYPE[p.ptype];
-  const status = mapStatus(p);
+  const status = mapStatus(p, account, dbVotes);
   const creator = account?.signers.find(s => s.isCreator)?.commitment ?? "";
   // Approve intents are persisted off-chain in the Vote table. The on-chain
   // FHE bitmap remains the authoritative validator; this just lets the UI
@@ -108,7 +123,7 @@ function proposalToTx(p: ZamaProposal, account: ZamaAccount | null, dbVotes: Zam
     return {
       voterCommitment: signer?.commitment ?? v.commitment,
       voterName: signer?.name ?? null,
-      voteType: VoteType.APPROVE,
+      voteType: v.voteType === "DENY" ? VoteType.DENY : VoteType.APPROVE,
     };
   }) as any[];
 
@@ -119,7 +134,7 @@ function proposalToTx(p: ZamaProposal, account: ZamaAccount | null, dbVotes: Zam
     type: ptype,
     status,
     nonce: p.id,
-    txHash: null,
+    txHash: p.executeTxHash ?? null,
     value: p.details?.amount ?? null,
     to: p.details?.to ?? null,
     tokenAddress: p.details?.token ?? null,
@@ -185,8 +200,12 @@ export const transactionApi = {
   },
 
   deny: async (txId: number, _dto: DenyTransactionDto) => {
-    // Zama protocol has no on-chain "deny" — denial is implicit (don't approve).
-    return { txId, voteType: VoteType.DENY, status: TxStatus.REJECTED, denyCount: 0 };
+    const accountAddress = useAccountStore.getState().currentAccount?.address;
+    const commitment = (await import("~~/services/store")).useIdentityStore.getState().commitment;
+    if (!accountAddress) throw new Error("No active account");
+    if (!commitment) throw new Error("No membership ID — sign the identity message first");
+    await zamaClient.post(`/zama/accounts/${accountAddress}/proposals/${txId}/deny`, { commitment });
+    return { txId, voteType: VoteType.DENY, status: TxStatus.PENDING, denyCount: 0 };
   },
 
   markExecuted: async (txId: number, _txHash: string): Promise<Transaction> => {

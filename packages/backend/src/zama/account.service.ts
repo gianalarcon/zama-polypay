@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { HIDDEN_MULTISIG_ABI, HIDDEN_MULTISIG_BYTECODE } from "@polypay/shared";
+import { ACCOUNT_CREATED_EVENT, AccountCreatedEventData, HIDDEN_MULTISIG_ABI, HIDDEN_MULTISIG_BYTECODE } from "@polypay/shared";
 import { Contract, ContractFactory, JsonRpcProvider, Wallet, getAddress } from "ethers";
 import { PrismaService } from "../database/prisma.service";
 import { CHAIN_ID } from "./constants";
+import { EventsGateway } from "./events.gateway";
 
 export type SignerInput = {
   commitment: string;
@@ -43,6 +44,7 @@ export class AccountService implements OnModuleInit {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly events: EventsGateway,
   ) {}
 
   onModuleInit(): void {
@@ -140,6 +142,18 @@ export class AccountService implements OnModuleInit {
       },
       include: { signers: true },
     });
+
+    // Broadcast so any signer connected to the socket (regardless of which
+    // account room they joined) gets notified the account is live.
+    const eventData: AccountCreatedEventData = {
+      accountAddress: account.address,
+      name: account.name ?? "",
+      threshold: account.threshold,
+      signerCount: account.signers.length,
+      createdAt: account.createdAt.toISOString(),
+    };
+    this.events.broadcast(ACCOUNT_CREATED_EVENT, eventData);
+
     return account;
   }
 

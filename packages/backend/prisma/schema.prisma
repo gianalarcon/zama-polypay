@@ -43,18 +43,33 @@ model AccountSigner {
   @@index([commitment])
 }
 
-/// Records each successful approve() call, keyed by (account, proposal,
-/// commitment). The contract's encrypted bitmap is the authoritative
-/// validator; this table mirrors approval intent off-chain so the UI can
-/// render "who approved" without forcing a KMS decryption per render.
+/// Records each vote (approve or deny) keyed by (account, proposal, commitment).
+/// The contract's encrypted bitmap is the authoritative validator for approvals;
+/// deny is purely off-chain (Zama HiddenMultisig has no on-chain deny). The UI
+/// reads this table to render "who approved / who denied".
 model Vote {
   id              String   @id @default(uuid())
   accountAddress  String
   propId          Int
   commitment      String
+  voteType        String   @default("APPROVE")
   txHash          String?
   createdAt       DateTime @default(now())
 
   @@unique([accountAddress, propId, commitment])
   @@index([accountAddress, propId])
+}
+
+/// Persists the on-chain finalizeExecute txHash for each executed proposal
+/// so the dashboard can render an explorer link. Keyed by (account, propId).
+model ProposalExecution {
+  id             String   @id @default(uuid())
+  accountAddress String
+  propId         Int
+  txHash         String
+  blockNumber    Int?
+  createdAt      DateTime @default(now())
+
+  @@unique([accountAddress, propId])
+  @@index([accountAddress])
 }

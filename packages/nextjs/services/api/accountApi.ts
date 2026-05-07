@@ -13,7 +13,8 @@ export const accountApi = {
   },
 
   getByAddress: async (address: string): Promise<Account> => {
-    const { data } = await apiClient.get<Account>(API_ENDPOINTS.accounts.byAddress(address));
+    // Polypay-Zama backend exposes the multisig account at /api/zama/accounts/:address.
+    const { data } = await apiClient.get<Account>(`/api/zama/accounts/${address}`);
     return data;
   },
 

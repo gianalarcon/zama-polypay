@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import Image from "next/image";
 import { ResolvedToken, ZERO_ADDRESS, parseTokenAmount } from "@polypay/shared";
-import { parseEther } from "viem";
+import { formatUnits, parseEther, parseUnits } from "viem";
 import { useBalance } from "wagmi";
 import { sepolia } from "wagmi/chains";
 import { TokenPillPopover } from "~~/components/popovers/TokenPillPopover";
@@ -44,14 +44,20 @@ export default function TransferContainer() {
     setSelectedToken(nativeEth);
   }, [nativeEth]);
 
-  // Display the multisig's ETH balance (per-token balance lookups skipped
-  // here; the relayer-side parseTokenAmount keeps amount math accurate).
+  const isNativeETH = selectedToken.address === nativeEth.address || selectedToken.address === ZERO_ADDRESS;
+
+  // Fetch the multisig's balance for the currently selected token. wagmi's
+  // useBalance reads ERC20 balances when `token` is passed and falls back
+  // to native ETH otherwise.
   const balance = useBalance({
     address: accountAddress as `0x${string}` | undefined,
     chainId: sepolia.id,
+    token: isNativeETH ? undefined : (selectedToken.address as `0x${string}`),
     query: { enabled: Boolean(accountAddress) },
   });
-  const ethBalance = balance.data ? (Number(balance.data.value) / 1e18).toFixed(4) : "0";
+  const formattedBalance = balance.data
+    ? Number(formatUnits(balance.data.value, balance.data.decimals)).toFixed(4)
+    : "0";
 
   const form = useZodForm({
     schema: transferSchema,
@@ -59,10 +65,8 @@ export default function TransferContainer() {
   });
 
   const handleMaxClick = () => {
-    form.setValue("amount", ethBalance, { shouldValidate: true });
+    form.setValue("amount", formattedBalance, { shouldValidate: true });
   };
-
-  const isNativeETH = selectedToken.address === nativeEth.address || selectedToken.address === ZERO_ADDRESS;
 
   const handleTransfer = async (data: TransferFormData) => {
     if (!accountAddress) {
@@ -107,6 +111,20 @@ export default function TransferContainer() {
   const watchedRecipient = form.watch("recipient");
   const watchedAmount = form.watch("amount");
   const isAmountValid = watchedAmount !== "" && parseFloat(watchedAmount) > 0;
+
+  // Insufficient-balance gate — works for native ETH and any ERC20 the
+  // user has selected (useBalance returns ERC20 balances when `token` is
+  // passed).
+  const balanceRaw = balance.data?.value ?? 0n;
+  const inputRaw = (() => {
+    if (!isAmountValid) return 0n;
+    try {
+      return parseUnits(watchedAmount, selectedToken.decimals);
+    } catch {
+      return 0n;
+    }
+  })();
+  const insufficientBalance = isAmountValid && Boolean(balance.data) && inputRaw > balanceRaw;
 
   return (
     <div className="overflow-hidden relative w-full h-full flex flex-col rounded-lg">
@@ -167,7 +185,7 @@ export default function TransferContainer() {
           <div className="flex items-center gap-3 text-grey-500 text-base">
             <span>Polypay account balance:</span>
             <span className="font-semibold text-grey-700">
-              {balance.isLoading ? "..." : ethBalance} {selectedToken.symbol}
+              {balance.isLoading ? "..." : formattedBalance} {selectedToken.symbol}
             </span>
             <button
               type="button"
@@ -182,6 +200,7 @@ export default function TransferContainer() {
           {form.formState.errors.amount && (
             <p className="text-red-500 text-xs">{form.formState.errors.amount.message}</p>
           )}
+          {insufficientBalance && <p className="text-red-500 text-xs text-center">Insufficient balance</p>}
         </div>
 
         {/* Divider */}
@@ -219,12 +238,14 @@ export default function TransferContainer() {
         <div className="flex gap-2 items-center justify-center w-full max-w-xs">
           <button
             onClick={form.handleSubmit(handleTransfer)}
-            disabled={isLoading || !isAmountValid || !watchedRecipient || !accountAddress}
+            disabled={
+              isLoading || !isAmountValid || !watchedRecipient || !accountAddress || insufficientBalance
+            }
             className="bg-pink-350 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] disabled:opacity-50 cursor-pointer border-0 flex-1 hover:bg-pink-450 transition-colors"
           >
             {isLoading && <Spinner />}
             <span className="font-medium xl:text-base text-xs text-center tracking-[-0.16px]">
-              {isLoading ? "Submitting…" : "Submit Proposal"}
+              {isLoading ? "Submitting…" : insufficientBalance ? "Insufficient balance" : "Submit Proposal"}
             </span>
           </button>
         </div>
