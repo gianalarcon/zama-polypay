@@ -33,9 +33,8 @@ const StatusContainer: React.FC<StatusContainerProps> = ({
   const validSignersToShow = getValidSigners(signers);
 
   const getSectionTitle = () => {
-    if (currentStep === 1) return "1.  Choose network";
-    if (currentStep === 2) return "1.  Basic setup";
-    return `3.  Signers & Confirmations(${validSignersToShow.length})`;
+    if (currentStep === 1) return "1.  Basic setup";
+    return `2.  Signers & Confirmations(${validSignersToShow.length})`;
   };
 
   return (
@@ -57,21 +56,10 @@ const StatusContainer: React.FC<StatusContainerProps> = ({
           {/* Step 2 */}
           <div
             className={`h-8 rounded-full flex items-center justify-center transition-all border-white border-[2px] shaddow-[#5A5A5A40] shadow-lg ${
-              currentStep === 2 ? "bg-violet-300 w-24" : currentStep > 2 ? "bg-green-500 w-8" : "bg-gray-200 w-8"
+              currentStep === 2 ? "bg-violet-300 w-24" : "bg-gray-200 w-8"
             }`}
           >
-            <span className={`text-base ${currentStep >= 2 ? "text-white" : "text-gray-400"}`}>
-              {currentStep > 2 ? "✓" : "2"}
-            </span>
-          </div>
-
-          {/* Step 3 */}
-          <div
-            className={`h-8 rounded-full flex items-center justify-center transition-all border-white border-[2px] shaddow-[#5A5A5A40] shadow-lg ${
-              currentStep === 3 ? "bg-violet-300 w-24" : "bg-gray-200 w-8"
-            }`}
-          >
-            <span className={`text-base ${currentStep === 3 ? "text-white" : "text-gray-400"}`}>3</span>
+            <span className={`text-base ${currentStep >= 2 ? "text-white" : "text-gray-400"}`}>2</span>
           </div>
         </div>
 
@@ -116,35 +104,13 @@ const StatusContainer: React.FC<StatusContainerProps> = ({
 
           <div className="flex-1 overflow-auto p-4">
             {currentStep === 1 ? (
-              /* Step 1 - Network list */
-              <div className="flex flex-col gap-3">
-                {selectedChainIds.length > 0 ? (
-                  selectedChainIds.map(chainId => {
-                    const meta = getNetworkMeta(chainId);
-                    return (
-                      <div
-                        key={chainId}
-                        className="flex items-center gap-3 p-2 bg-white rounded-lg border border-gray-200"
-                      >
-                        <Image src={meta.icon} alt={meta.name} width={32} height={32} />
-                        <span className="text-sm font-medium text-grey-950">{meta.name}</span>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full">
-                    <span className="text-gray-400 text-sm">Select at least one network</span>
-                  </div>
-                )}
-              </div>
-            ) : currentStep === 2 ? (
-              /* Step 2 - Placeholder for signers */
+              /* Step 1 - Placeholder for signers */
               <div className="flex flex-col gap-3 items-center justify-center h-full">
                 <Image src="/new-account/frame.svg" alt="Setup" className="w-25 h-25" width={100} height={100} />
                 <span className="text-grey-1000 text-sm">Setup on next step</span>
               </div>
             ) : (
-              /* Step 3 - Signers list */
+              /* Step 2 - Signers list */
               <div className="flex flex-col gap-3">
                 {validSignersToShow.length > 0 ? (
                   <>
@@ -192,15 +158,15 @@ const StatusContainer: React.FC<StatusContainerProps> = ({
       <div className="bg-gray-50 w-full px-5 py-4 border-t border-gray-200">
         <button
           onClick={onCreateAccount}
-          disabled={currentStep < 3 || loading || !isFormValid}
+          disabled={currentStep < 2 || loading || !isFormValid}
           className={`flex items-center justify-center px-5 py-3 rounded-xl w-full transition-all ${
-            currentStep === 3 && isFormValid && !loading
+            currentStep === 2 && isFormValid && !loading
               ? "bg-primary hover:shadow-lg cursor-pointer"
               : "bg-gray-300 cursor-not-allowed"
           }`}
         >
           <span
-            className={`flex items-center gap-3 font-semibold xl:text-base text-sm ${currentStep === 3 && isFormValid && !loading ? "text-black" : "text-white"}`}
+            className={`flex items-center gap-3 font-semibold xl:text-base text-sm ${currentStep === 2 && isFormValid && !loading ? "text-black" : "text-white"}`}
           >
             {loading ? "Creating your account..." : "Create your account"}
             {loading && (

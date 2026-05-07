@@ -4,11 +4,14 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useWalletClient } from "wagmi";
 import AccountName from "./AccountName";
 import SignersConfirmations from "./SignersConfirmations";
 import StatusContainer from "./StatusContainer";
 import SuccessScreen from "./SuccessScreen";
+import { accountKeys } from "~~/hooks/api/useAccount";
+import { userKeys } from "~~/hooks/api/useUser";
 import { useZodForm } from "~~/hooks/form";
 import { CreateAccountFormData, createAccountSchema } from "~~/lib/form";
 import { useAccountStore } from "~~/services/store";
@@ -35,11 +38,12 @@ const SEPOLIA_CHAIN_ID = 11155111;
  */
 export default function NewAccountContainer() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { data: walletClient } = useWalletClient();
   const { commitment } = useIdentityStore();
   const { setCurrentAccount } = useAccountStore();
 
-  const [currentStep, setCurrentStep] = useState(2); // skip ChooseNetwork
+  const [currentStep, setCurrentStep] = useState(1); // 1=AccountName, 2=Signers, 3=Success
   const [selectedChainIds] = useState<number[]>([SEPOLIA_CHAIN_ID]);
   const [createdAccounts, setCreatedAccounts] = useState<any[] | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -74,7 +78,7 @@ export default function NewAccountContainer() {
     }
     setCurrentStep(prev => prev + 1);
   };
-  const handleGoBack = () => setCurrentStep(prev => Math.max(2, prev - 1));
+  const handleGoBack = () => setCurrentStep(prev => Math.max(1, prev - 1));
 
   const handleCreateAccount = async () => {
     if (!walletClient) {
@@ -120,15 +124,19 @@ export default function NewAccountContainer() {
       });
 
       setCreatedAccounts([account]);
-      setCurrentAccount({
-        address: account.address,
-        chainId: account.chainId,
-        name: account.name,
-        threshold: account.threshold,
-        signers: [],
-      } as any);
+      // Use the full account object from response (includes signers list)
+      // so the sidebar AccountItem can render signers without a refetch.
+      setCurrentAccount(account);
 
-      setCurrentStep(4);
+      // Invalidate React Query caches so Sidebar/ManageAccountsSidebar
+      // re-fetches and shows the new account immediately.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: userKeys.accountsForCommitment(commitment) }),
+        queryClient.invalidateQueries({ queryKey: userKeys.meAccounts }),
+        queryClient.invalidateQueries({ queryKey: accountKeys.all }),
+      ]);
+
+      setCurrentStep(3);
     } catch (err: any) {
       const msg = err?.response?.data?.message ?? err?.message ?? String(err);
       notification.error(formatErrorMessage(err, `Failed: ${msg}`));
@@ -158,7 +166,7 @@ export default function NewAccountContainer() {
     </div>
   );
 
-  if (currentStep === 4) {
+  if (currentStep === 3) {
     return (
       <div className="flex flex-row gap-1 w-full h-full bg-app-background">
         <div className="flex-1 overflow-hidden relative flex flex-col rounded-lg bg-background border border-divider">
@@ -174,7 +182,7 @@ export default function NewAccountContainer() {
       <div className="flex-1 overflow-hidden relative flex flex-col rounded-lg bg-background border border-divider">
         {EarthBackground}
         <div className="flex-1 overflow-y-auto relative z-10">
-          {currentStep === 2 && (
+          {currentStep === 1 && (
             <AccountName
               className="flex-1"
               form={form}
@@ -183,7 +191,7 @@ export default function NewAccountContainer() {
               isValid={isNameValid}
             />
           )}
-          {currentStep === 3 && <SignersConfirmations className="flex-1" form={form} onGoBack={handleGoBack} />}
+          {currentStep === 2 && <SignersConfirmations className="flex-1" form={form} onGoBack={handleGoBack} />}
         </div>
       </div>
 
