@@ -170,7 +170,7 @@ yarn workspace @polypay/shared build
 7. Open signer B's browser profile, sign in, click **Dashboard** in the sidebar. Expand the proposal row and click **Approve**.
 8. Once the threshold is met, the row's button changes to **Execute**. Click it and wait ~30–60 s.
 9. The row turns green with a **Succeed** badge that links to Sepolia Etherscan.
-10. Open that Etherscan link to verify privacy: the hUSD `Transfer` event has no amount, every balance shows as a ciphertext handle. (Calling `getProposal(propId)` on the multisig contract still returns the plaintext recipient + amount — the demo limitation noted above.)
+10. Open that Etherscan link to verify privacy: the hUSD `Transfer` event has no amount, every balance shows as a ciphertext handle.
 
 ---
 
@@ -204,9 +204,3 @@ packages/
 ├── nextjs/         Frontend — /dashboard, /transfer, /mint, /dashboard/new-account
 └── shared/         Cross-package types, DTOs, contract artifacts (ABI + bytecode + addresses)
 ```
-
----
-
-## Disclaimer
-
-Hackathon code, not audited. The relayer EOA is a single point of trust. Don't use mainnet funds. Forked from the original [Polypay](https://github.com/Poly-pay/polypay_app) (zkVerify + Horizen) and rewritten for Zama Protocol.
