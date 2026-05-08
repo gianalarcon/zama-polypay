@@ -161,16 +161,16 @@ yarn workspace @polypay/shared build
 
 > Easiest with two browser profiles so you can play signer A and signer B.
 
-1. Open http://localhost:3000, connect wallet (Sepolia).
-2. Click **Generate Membership ID**, sign `Polypay-Zama identity v1` in MetaMask. Your commitment lands in `localStorage`.
-3. Go to `/dashboard/new-account`, name the account, add yourself + a second signer's commitment, set threshold (e.g. 2-of-2), Create. Wait ~30–60 s for FHE encrypt + deploy + initialize.
-4. `/mint`, tab **Mint to wallet**: enter `1000`, Mint. Wallet balance card flips once the relayer can decrypt it.
-5. `/mint`, tab **Deposit to multisig**: enter `100`, Deposit. The browser FHE-encrypts the amount and your wallet signs the prepared `hUSD.transfer(multisig, encAmount, proof)` call.
-6. `/transfer`: recipient + amount, Submit Proposal. Backend submits and auto-approves on your behalf.
-7. Switch to signer B's wallet, reload, Approve the proposal. Realtime WebSocket pushes the vote — the row updates without a refetch.
-8. With the threshold met, click **Execute**. Three on-chain steps run: `requestExecute` → KMS public-decrypt → `finalizeExecute` (which dispatches `hUSD.transfer` with a freshly encrypted amount).
-9. The row flips to a **Succeed** badge linking to Etherscan.
-10. Verify on Etherscan: the hUSD `Transfer` event has no amount; balances all read as ciphertext handles. Open the multisig contract → you'll see the proposal's plaintext `(to, amount)` if you call `getProposal(propId)` (the demo limitation called out above).
+1. Open http://localhost:3000 and connect a wallet on Sepolia.
+2. In the sidebar's bottom card, click **Generate your membership ID** and sign `Polypay-Zama identity v1` in MetaMask. The 20-byte commitment is stored in `localStorage`.
+3. Go to `/dashboard/new-account`. Enter an account name in step 1, then in step 2 add yourself + a second signer's commitment, set the threshold (e.g. 2-of-2), and click **Create your account**. Wait ~30–60 s for FHE encrypt + deploy + initialize.
+4. Go to `/mint`. With the **Mint to wallet** tab selected, enter `1000` and click **Mint hUSD**. The wallet balance card spins until the relayer can decrypt the new ciphertext, then flips to `1,000 hUSD`.
+5. Switch to the **Deposit to multisig** tab. Enter `100` and click **Deposit to multisig**. The browser FHE-encrypts the amount; your wallet signs the prepared `hUSD.transfer(multisig, encAmount, proof)` call.
+6. Go to `/transfer`. Enter recipient + amount and click **Submit Proposal**. The backend submits the proposal and auto-approves on your behalf (creating a proposal counts as your first vote).
+7. Switch to signer B's wallet, go to `/dashboard`, expand the proposal row, and click **Approve**.
+8. Once the threshold is met, the row's button flips to **Execute**. Click it. Three on-chain steps run: `requestExecute` → KMS public-decrypt → `finalizeExecute`, which dispatches `hUSD.transfer` with a freshly encrypted amount.
+9. The row flips to a green **Succeed** badge linking to `sepolia.etherscan.io`.
+10. Verify privacy on Etherscan: the hUSD `Transfer` event has no amount; balances all read as ciphertext handles. Open the multisig contract → calling `getProposal(propId)` returns the plaintext `(to, amount)` of the proposal (the demo limitation called out above).
 
 ---
 
