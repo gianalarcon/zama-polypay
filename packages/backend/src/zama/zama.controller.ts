@@ -127,6 +127,15 @@ export class ZamaController {
     return this.svc.approve(address, id, dto.commitment);
   }
 
+  @Post("accounts/:address/proposals/:id/deny")
+  deny(
+    @Param("address") address: string,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() dto: ApproveDto,
+  ) {
+    return this.svc.deny(address, id, dto.commitment);
+  }
+
   @Post("accounts/:address/proposals/:id/execute")
   execute(@Param("address") address: string, @Param("id", ParseIntPipe) id: number) {
     return this.svc.execute(address, id);

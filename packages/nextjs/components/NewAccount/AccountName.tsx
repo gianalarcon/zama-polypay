@@ -41,7 +41,7 @@ export default function AccountName({ className, form, onNextStep, onGoBack, isV
 
         {/* Step description */}
         <div className="flex items-center justify-center w-full max-w-2xl flex-col text-center">
-          <span className="text-text-primary uppercase text-[24px] font-semibold mb-4">2. Basic setup</span>
+          <span className="text-text-primary uppercase text-[24px] font-semibold mb-4">1. Basic setup</span>
           <span className="text-text-secondary text-base text-gray-500">
             This is the basic setup of the account, please enter the account name in the box below.
           </span>

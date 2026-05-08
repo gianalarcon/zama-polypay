@@ -19,6 +19,8 @@
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-socket.io": "^11.1.19",
+    "@nestjs/websockets": "^11.1.19",
     "@polypay/shared": "1.0.0",
     "@prisma/client": "^5.22.0",
     "@zama-fhe/relayer-sdk": "0.4.1",
@@ -26,7 +28,8 @@
     "class-validator": "^0.14.2",
     "ethers": "^6.13.2",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

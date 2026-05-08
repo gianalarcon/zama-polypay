@@ -15,7 +15,12 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useWalletClient } from "wagmi";
 import { accountKeys, useMetaMultiSigWallet, userKeys } from "~~/hooks";
-import { useApproveTransaction, useDenyTransaction, useExecuteTransaction } from "~~/hooks/api/useTransaction";
+import {
+  transactionKeys,
+  useApproveTransaction,
+  useDenyTransaction,
+  useExecuteTransaction,
+} from "~~/hooks/api/useTransaction";
 import { useGenerateProof } from "~~/hooks/app/useGenerateProof";
 import { useStepLoading } from "~~/hooks/app/useStepLoading";
 import { useIdentityStore } from "~~/services/store/useIdentityStore";
@@ -149,6 +154,13 @@ export const useTransactionVote = (options?: UseTransactionVoteOptions) => {
     try {
       await approveApi({ txId: tx.txId, dto: {} as any });
       notification.success("Vote submitted!");
+
+      // Force the dashboard list + per-tx detail caches to refetch so the
+      // current user sees their own approval reflected immediately.
+      queryClient.invalidateQueries({ queryKey: transactionKeys.all });
+      queryClient.invalidateQueries({
+        queryKey: transactionKeys.byAccount(metaMultiSigWallet?.address || ""),
+      });
       options?.onSuccess?.();
     } catch (error: any) {
       console.error("Approve error:", error);
@@ -158,9 +170,33 @@ export const useTransactionVote = (options?: UseTransactionVoteOptions) => {
     }
   };
 
-  const deny = async (_tx: TransactionRowData) => {
-    // Zama protocol has no on-chain deny — denial is implicit (don't approve).
-    notification.info("Polypay-Zama has no explicit deny — just don't approve.");
+  const deny = async (tx: TransactionRowData) => {
+    if (!commitment) {
+      notification.error("No membership ID — sign the identity message first");
+      return;
+    }
+    // Off-chain only: writes a DENY row to the Vote table. Zama HiddenMultisig
+    // has no on-chain deny opcode (the FHE bitmap only counts approvals), so
+    // the proposal stays PENDING and just never reaches threshold if enough
+    // signers deny.
+    startLoading("Submitting deny…");
+    try {
+      await denyApi({ txId: tx.txId, dto: {} as any });
+      notification.success("Deny recorded");
+
+      // Force the dashboard list + per-tx detail caches to refetch so the
+      // current user sees their own deny reflected immediately.
+      queryClient.invalidateQueries({ queryKey: transactionKeys.all });
+      queryClient.invalidateQueries({
+        queryKey: transactionKeys.byAccount(metaMultiSigWallet?.address || ""),
+      });
+      options?.onSuccess?.();
+    } catch (error: any) {
+      console.error("Deny error:", error);
+      notification.error(formatErrorMessage(error, "Failed to deny"));
+    } finally {
+      reset();
+    }
   };
 
   const execute = async (txId: number) => {
@@ -175,6 +211,10 @@ export const useTransactionVote = (options?: UseTransactionVoteOptions) => {
       queryClient.invalidateQueries({ queryKey: userKeys.all });
       queryClient.invalidateQueries({
         queryKey: accountKeys.byAddress(metaMultiSigWallet?.address || ""),
+      });
+      queryClient.invalidateQueries({ queryKey: transactionKeys.all });
+      queryClient.invalidateQueries({
+        queryKey: transactionKeys.byAccount(metaMultiSigWallet?.address || ""),
       });
       options?.onSuccess?.();
     } catch (error: any) {

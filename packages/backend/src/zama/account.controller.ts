@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { Type } from "class-transformer";
 import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, Min, ValidateNested } from "class-validator";
 import { AccountService } from "./account.service";
@@ -36,6 +36,12 @@ class CreateAccountDto {
   signers!: SignerDto[];
 }
 
+class UpdateAccountDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+}
+
 @Controller("zama/accounts")
 export class AccountController {
   constructor(private readonly svc: AccountService) {}
@@ -58,5 +64,10 @@ export class AccountController {
       threshold: dto.threshold,
       signers: dto.signers,
     });
+  }
+
+  @Patch(":address")
+  update(@Param("address") address: string, @Body() dto: UpdateAccountDto) {
+    return this.svc.update(address, dto);
   }
 }

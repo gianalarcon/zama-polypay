@@ -3,6 +3,7 @@ import { ConfigModule } from "@nestjs/config";
 import { existsSync } from "fs";
 import { join } from "path";
 import { DatabaseModule } from "./database/database.module";
+import { PriceModule } from "./price/price.module";
 import { ZamaModule } from "./zama/zama.module";
 
 const localEnv = join(__dirname, "..", ".env");
@@ -20,6 +21,6 @@ if (!existsSync(envFilePath)) {
 }
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath }), DatabaseModule, ZamaModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath }), DatabaseModule, PriceModule, ZamaModule],
 })
 export class AppModule {}

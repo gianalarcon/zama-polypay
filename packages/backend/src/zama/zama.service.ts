@@ -1,9 +1,28 @@
 import { Injectable, Logger, OnModuleInit, BadRequestException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import {
+  TX_CREATED_EVENT,
+  TX_STATUS_EVENT,
+  TX_VOTED_EVENT,
+  TxCreatedEventData,
+  TxStatusEventData,
+  TxStatus,
+  TxType,
+  TxVotedEventData,
+  VoteType,
+} from "@polypay/shared";
 import { AbiCoder, Contract, JsonRpcProvider, TransactionReceipt, Wallet, getAddress } from "ethers";
 import { PrismaService } from "../database/prisma.service";
 import { HIDDEN_MULTISIG_ABI } from "./abi";
 import { CHAIN_ID, PROPOSAL_TYPES, ProposalTypeName } from "./constants";
+import { EventsGateway } from "./events.gateway";
+
+const METHOD_TO_TX_TYPE: Record<string, TxType> = {
+  proposeTransfer: TxType.TRANSFER,
+  proposeSetThreshold: TxType.SET_THRESHOLD,
+  proposeAddSigner: TxType.ADD_SIGNER,
+  proposeRemoveSigner: TxType.REMOVE_SIGNER,
+};
 
 /**
  * Zama relayer service.
@@ -25,6 +44,7 @@ export class ZamaService implements OnModuleInit {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly events: EventsGateway,
   ) {}
 
   onModuleInit(): void {
@@ -107,6 +127,9 @@ export class ZamaService implements OnModuleInit {
     const c = this.readContract(address);
     const r = await c.getProposal(propId);
     const ptype: ProposalTypeName | "Unknown" = PROPOSAL_TYPES[Number(r.ptype)] ?? "Unknown";
+    const exec = await (this.prisma.proposalExecution.findUnique as any)({
+      where: { accountAddress_propId: { accountAddress: address, propId } },
+    });
     return {
       id: propId,
       ptype,
@@ -117,6 +140,7 @@ export class ZamaService implements OnModuleInit {
       executed: Boolean(r.executed),
       ready: Boolean(r.ready),
       createdAt: Number(r.createdAt),
+      executeTxHash: exec?.txHash ?? null,
     };
   }
 
@@ -195,6 +219,15 @@ export class ZamaService implements OnModuleInit {
     creatorCommitment?: string,
   ): Promise<{ txHash: string; propId: number }> {
     const result = await this.submitProposal(address, method, args);
+
+    // Notify the account room so other signers see the new proposal in real time.
+    const txCreated: TxCreatedEventData = {
+      txId: result.propId,
+      type: METHOD_TO_TX_TYPE[method] ?? TxType.TRANSFER,
+      accountAddress: getAddress(address),
+    };
+    this.events.emitToAccount(address, TX_CREATED_EVENT, txCreated);
+
     if (creatorCommitment) {
       try {
         await this.approve(address, result.propId, creatorCommitment);
@@ -212,6 +245,20 @@ export class ZamaService implements OnModuleInit {
    * (account, relayer), then submits via the contract.
    */
   async approve(address: string, propId: number, commitment: string) {
+    // Block users who already denied off-chain from also approving.
+    const existing = await (this.prisma as any).vote.findUnique({
+      where: {
+        accountAddress_propId_commitment: {
+          accountAddress: getAddress(address),
+          propId,
+          commitment: commitment.toLowerCase(),
+        },
+      },
+    });
+    if (existing && existing.voteType === "DENY") {
+      throw new BadRequestException("You already denied this proposal");
+    }
+
     const fhevm = await this.getFhevmInstance();
     const input = fhevm.createEncryptedInput(getAddress(address), getAddress(this.wallet.address));
     input.addAddress(getAddress(commitment));
@@ -241,15 +288,97 @@ export class ZamaService implements OnModuleInit {
           accountAddress: getAddress(address),
           propId,
           commitment: commitment.toLowerCase(),
+          voteType: "APPROVE",
           txHash: tx.hash,
         },
-        update: { txHash: tx.hash },
+        update: { voteType: "APPROVE", txHash: tx.hash },
       });
     } catch (err: any) {
       this.logger.warn(`Vote upsert failed for ${address}#${propId}: ${err?.message ?? err}`);
     }
 
+    await this.emitVoteEvent(address, propId, commitment, VoteType.APPROVE, tx.hash);
+
     return { txHash: tx.hash, blockNumber: receipt?.blockNumber };
+  }
+
+  /**
+   * Deny: off-chain only. Zama HiddenMultisig has no deny opcode (the
+   * encrypted approval bitmap can only count approvals). We persist a
+   * DENY row in the Vote table so the dashboard can show who rejected;
+   * the on-chain proposal stays PENDING and simply never reaches the
+   * approval threshold if enough signers deny.
+   */
+  async deny(address: string, propId: number, commitment: string) {
+    const existing = await (this.prisma as any).vote.findUnique({
+      where: {
+        accountAddress_propId_commitment: {
+          accountAddress: getAddress(address),
+          propId,
+          commitment: commitment.toLowerCase(),
+        },
+      },
+    });
+    if (existing && existing.voteType === "APPROVE") {
+      throw new BadRequestException("You already approved this proposal");
+    }
+
+    await (this.prisma as any).vote.upsert({
+      where: {
+        accountAddress_propId_commitment: {
+          accountAddress: getAddress(address),
+          propId,
+          commitment: commitment.toLowerCase(),
+        },
+      },
+      create: {
+        accountAddress: getAddress(address),
+        propId,
+        commitment: commitment.toLowerCase(),
+        voteType: "DENY",
+      },
+      update: { voteType: "DENY" },
+    });
+
+    await this.emitVoteEvent(address, propId, commitment, VoteType.DENY, null);
+
+    return { ok: true, voteType: "DENY" };
+  }
+
+  private async emitVoteEvent(
+    address: string,
+    propId: number,
+    commitment: string,
+    voteType: VoteType,
+    txHash: string | null,
+  ): Promise<void> {
+    const approveCount = await (this.prisma as any).vote.count({
+      where: { accountAddress: getAddress(address), propId, voteType: "APPROVE" },
+    });
+    const eventData: TxVotedEventData = {
+      txId: propId,
+      voteType,
+      approveCount,
+      vote: {
+        id: 0 as any,
+        txId: propId,
+        voterCommitment: commitment.toLowerCase(),
+        voterName: null,
+        voteType,
+        txHash,
+        proofStatus: undefined as any,
+        zkVerifyStatementHash: null,
+        zkVerifyAttestationId: null,
+        zkVerifyTxHash: null,
+        zkVerifyAggregationId: null,
+        zkVerifyJobId: null,
+        proofSubmittedAt: null,
+        proofVerifiedAt: null,
+        proofErrorMessage: null,
+        createdAt: new Date(),
+      } as any,
+    };
+    this.events.emitToAccount(address, TX_VOTED_EVENT, eventData);
   }
 
   async listVotes(address: string, propId: number) {
@@ -287,7 +416,30 @@ export class ZamaService implements OnModuleInit {
     const finReceipt = await finTx.wait();
     this.logger.log(`finalizeExecute ${address}#${propId} mined: ${finTx.hash}`);
 
+    // Persist the execute txHash so the dashboard can render an explorer link.
+    await (this.prisma.proposalExecution.upsert as any)({
+      where: { accountAddress_propId: { accountAddress: address, propId } },
+      create: {
+        accountAddress: address,
+        propId,
+        txHash: finTx.hash,
+        blockNumber: finReceipt?.blockNumber ? Number(finReceipt.blockNumber) : null,
+      },
+      update: {
+        txHash: finTx.hash,
+        blockNumber: finReceipt?.blockNumber ? Number(finReceipt.blockNumber) : null,
+      },
+    });
+
     const prop = await this.getProposal(address, propId);
+
+    const statusEvent: TxStatusEventData = {
+      txId: propId,
+      status: prop.ready ? TxStatus.EXECUTED : TxStatus.FAILED,
+      txHash: finTx.hash,
+    };
+    this.events.emitToAccount(address, TX_STATUS_EVENT, statusEvent);
+
     return {
       txHash: finTx.hash,
       blockNumber: finReceipt?.blockNumber,
