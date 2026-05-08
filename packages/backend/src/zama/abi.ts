@@ -13,16 +13,17 @@ export const HIDDEN_MULTISIG_ABI = [
   'function nextPropId() view returns (uint256)',
   'function getReadyHandle(uint256) view returns (bytes32)',
   'function getProposal(uint256) view returns (uint8 ptype, bytes data, uint256 approvalAttempts, bool decryptionPending, bool executed, bool ready, uint256 createdAt)',
+  'function hUSD() view returns (address)',
   // Init / proposals
   'function initialize(bytes32[] encOwners, bytes proof, uint8 _threshold)',
-  'function proposeTransfer(address to, uint256 amount, address token) returns (uint256)',
+  'function proposeTransfer(address to, uint64 amount) returns (uint256)',
   'function proposeSetThreshold(uint8 newThreshold) returns (uint256)',
   'function proposeAddSigner(bytes32 encNewOwner, bytes proof) returns (uint256)',
   'function proposeRemoveSigner(uint256 idx) returns (uint256)',
   // Approve / execute
   'function approve(uint256 propId, bytes32 encSigner, bytes proof)',
   'function requestExecute(uint256 propId)',
-  'function finalizeExecute(uint256 propId, bytes abiEncodedCleartexts, bytes decryptionProof)',
+  'function finalizeExecute(uint256 propId, bytes abiEncodedCleartexts, bytes decryptionProof, bytes extraData)',
   // Events
   'event Initialized(uint8 threshold, uint256 ownersCount)',
   'event ProposalCreated(uint256 indexed propId, uint8 ptype)',

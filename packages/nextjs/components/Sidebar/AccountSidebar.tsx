@@ -6,10 +6,12 @@ import NetworkBadge from "../Common/NetworkBadge";
 import { MultisigConnectButton } from "../scaffold-eth/RainbowKitCustomConnectButton/MultisigConnectButton";
 import { WrongNetwork } from "../scaffold-eth/RainbowKitCustomConnectButton/WrongNetwork";
 import { useQueryClient } from "@tanstack/react-query";
-import { Address } from "viem";
+import { HUSD_DECIMALS, HUSD_SYMBOL } from "@polypay/shared";
+import { Address, formatUnits } from "viem";
 import { useAccount, useDisconnect, useWalletClient } from "wagmi";
 import ShinyText from "~~/components/effects/ShinyText";
 import { useMyAccounts, userKeys } from "~~/hooks";
+import { useHusdBalance } from "~~/hooks/api/useHusdBalance";
 import { useModalApp } from "~~/hooks/app/useModalApp";
 import { useNetworkGuard } from "~~/hooks/app/useNetworkGuard";
 import { useAppRouter } from "~~/hooks/app/useRouteApp";
@@ -41,6 +43,11 @@ export default function AccountSidebar({ onOpenManageAccounts }: AccountSidebarP
   const mySigner = currentAccount?.signers?.find(s => s.commitment === commitment);
 
   const { isWrongNetwork, targetChainId } = useNetworkGuard();
+
+  const { balance: husdBalance } = useHusdBalance(walletClient?.account?.address ?? null);
+  const formattedHusd = husdBalance
+    ? Number(formatUnits(BigInt(husdBalance), HUSD_DECIMALS)).toLocaleString("en-US", { maximumFractionDigits: 2 })
+    : "0";
 
   const hasAccounts = accounts && accounts.length > 0;
 
@@ -115,7 +122,7 @@ export default function AccountSidebar({ onOpenManageAccounts }: AccountSidebarP
         {/* Info */}
         <div className="xl:flex hidden flex-1 flex-col gap-1">
           {hasAccounts ? (
-            // Have account - 2 lines
+            // Have account - 3 lines (name, signer, hUSD)
             <>
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-medium text-main-pink truncate max-w-[120px] tracking-[-0.04em]">
@@ -134,33 +141,45 @@ export default function AccountSidebar({ onOpenManageAccounts }: AccountSidebarP
                   {mySigner?.name ? `${mySigner?.name} (${shortAddress})` : shortAddress}
                 </span>
               </div>
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-medium text-grey-700 tracking-[-0.04em]">
+                  {formattedHusd} {HUSD_SYMBOL}
+                </span>
+              </div>
             </>
           ) : (
-            // No account - 1 line only
-            <div className="flex items-center gap-1.5">
-              {/* Wallet Icon from connector */}
-              {connector?.icon && (
+            // No account - 2 lines (address, hUSD)
+            <>
+              <div className="flex items-center gap-1.5">
+                {/* Wallet Icon from connector */}
+                {connector?.icon && (
+                  <Image
+                    src={connector.icon}
+                    alt={connector.name || "Wallet"}
+                    width={16}
+                    height={16}
+                    className="rounded"
+                  />
+                )}
+                <span className="text-sm font-medium text-grey-900 tracking-[-0.04em]">{shortAddress}</span>
                 <Image
-                  src={connector.icon}
-                  alt={connector.name || "Wallet"}
+                  src="/icons/actions/copy-purple.svg"
+                  alt="Copy"
                   width={16}
                   height={16}
-                  className="rounded"
+                  className="opacity-40 cursor-pointer hover:opacity-100"
+                  onClick={e => {
+                    e.stopPropagation();
+                    copyToClipboard(walletClient.account.address, "Address copied to clipboard");
+                  }}
                 />
-              )}
-              <span className="text-sm font-medium text-grey-900 tracking-[-0.04em]">{shortAddress}</span>
-              <Image
-                src="/icons/actions/copy-purple.svg"
-                alt="Copy"
-                width={16}
-                height={16}
-                className="opacity-40 cursor-pointer hover:opacity-100"
-                onClick={e => {
-                  e.stopPropagation();
-                  copyToClipboard(walletClient.account.address, "Address copied to clipboard");
-                }}
-              />
-            </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-medium text-grey-700 tracking-[-0.04em]">
+                  {formattedHusd} {HUSD_SYMBOL}
+                </span>
+              </div>
+            </>
           )}
         </div>
 

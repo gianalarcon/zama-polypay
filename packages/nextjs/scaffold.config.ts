@@ -22,7 +22,8 @@ const scaffoldConfig = {
   pollingInterval: RPC_POLLING_INTERVAL,
   alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || DEFAULT_ALCHEMY_API_KEY,
   rpcOverrides: {
-    [chains.sepolia.id]: process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || "https://sepolia.drpc.org",
+    [chains.sepolia.id]:
+      process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || "https://ethereum-sepolia.publicnode.com",
   },
   walletConnectProjectId:
     process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID || "3a8170812b534d0ff9d794f19a901d64",

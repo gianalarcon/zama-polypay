@@ -23,7 +23,10 @@ const sectionItems = [
   {
     label: "Payments",
     requireAccount: true,
-    menuItems: [{ icon: Routes.TRANSFER.icon, label: Routes.TRANSFER.title, link: Routes.TRANSFER.path }],
+    menuItems: [
+      { icon: Routes.TRANSFER.icon, label: Routes.TRANSFER.title, link: Routes.TRANSFER.path },
+      { icon: Routes.MINT.icon, label: Routes.MINT.title, link: Routes.MINT.path },
+    ],
   },
   // Quest & Leaderboard temporarily hidden — kept for future reuse.
   // {

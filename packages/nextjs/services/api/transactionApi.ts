@@ -111,7 +111,14 @@ async function fetchVotes(address: string, propId: number): Promise<ZamaVote[]> 
 function proposalToTx(p: ZamaProposal, account: ZamaAccount | null, dbVotes: ZamaVote[] = []): Transaction {
   const ptype = ZAMA_TO_TX_TYPE[p.ptype];
   const status = mapStatus(p, account, dbVotes);
-  const creator = account?.signers.find(s => s.isCreator)?.commitment ?? "";
+  // Backend's proposeAndAutoApprove writes the proposer's auto-approve Vote
+  // first, before any other signer can vote. Treat the chronologically
+  // earliest vote as the proposer so the dashboard renders "Created by"
+  // for whoever actually submitted the proposal — not just the account
+  // deployer (account.signers.isCreator).
+  const sortedVotes = [...dbVotes].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const creator =
+    sortedVotes[0]?.commitment ?? account?.signers.find(s => s.isCreator)?.commitment ?? "";
   // Approve intents are persisted off-chain in the Vote table. The on-chain
   // FHE bitmap remains the authoritative validator; this just lets the UI
   // show "Bob approved" instead of an opaque counter.
@@ -137,7 +144,7 @@ function proposalToTx(p: ZamaProposal, account: ZamaAccount | null, dbVotes: Zam
     txHash: p.executeTxHash ?? null,
     value: p.details?.amount ?? null,
     to: p.details?.to ?? null,
-    tokenAddress: p.details?.token ?? null,
+    tokenAddress: null,
     threshold: account?.threshold ?? 0,
     newThreshold: p.details?.newThreshold ?? null,
     signerData: null,

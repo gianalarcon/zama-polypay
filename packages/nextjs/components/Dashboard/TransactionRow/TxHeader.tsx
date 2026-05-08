@@ -4,8 +4,9 @@ import React from "react";
 import Image from "next/image";
 import { AddressWithContact } from "./AddressWithContact";
 import { getExpandedHeaderText } from "./utils";
-import { TxType, ZERO_ADDRESS, formatTokenAmount, getTokenByAddress } from "@polypay/shared";
+import { HUSD_DECIMALS, HUSD_SYMBOL, TxType, ZERO_ADDRESS, formatTokenAmount, getTokenByAddress } from "@polypay/shared";
 import { Contact } from "@polypay/shared";
+import { formatUnits } from "viem";
 import { BatchContactEntry } from "~~/components/modals/CreateBatchFromContactsModal";
 import { modalManager } from "~~/components/modals/ModalLayout";
 import { BatchTransfer, TransactionRowData, VoteStatus, useNetworkTokens } from "~~/hooks";
@@ -153,18 +154,16 @@ export function TxHeader({
   );
 
   if (tx.type === TxType.TRANSFER) {
+    const husdAmount = tx.amount ? Number(formatUnits(BigInt(tx.amount), HUSD_DECIMALS)) : 0;
     return (
       <div className="bg-violet-300 text-white p-4 rounded-lg">
         {renderHeaderRow()}
         <div className="flex items-center gap-4" key={tx.type}>
           <span className="mr-10">Tranfer</span>
-          <Image
-            src={getTokenByAddress(tx.tokenAddress, chainId).icon}
-            alt={getTokenByAddress(tx.tokenAddress, chainId).symbol}
-            width={20}
-            height={20}
-          />
-          <span>{formatAmount(tx.amount ?? "0", chainId, tx.tokenAddress)}</span>
+          <Image src="/logo/polypay-icon.svg" alt={HUSD_SYMBOL} width={20} height={20} />
+          <span>
+            {husdAmount.toLocaleString("en-US", { maximumFractionDigits: 4 })} {HUSD_SYMBOL}
+          </span>
           <Image src="/icons/arrows/arrow-right-long-white.svg" alt="Arrow Right" width={100} height={100} />
           <AddressWithContact address={tx.recipientAddress ?? ""} contactName={tx.contact?.name} className="bg-white" />
         </div>

@@ -1,9 +1,9 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { ACCOUNT_CREATED_EVENT, AccountCreatedEventData, HIDDEN_MULTISIG_ABI, HIDDEN_MULTISIG_BYTECODE } from "@polypay/shared";
+import { ACCOUNT_CREATED_EVENT, AccountCreatedEventData, HIDDEN_MULTISIG_ABI, HIDDEN_MULTISIG_BYTECODE, HUSD_ADDRESS } from "@polypay/shared";
 import { Contract, ContractFactory, JsonRpcProvider, Wallet, getAddress } from "ethers";
 import { PrismaService } from "../database/prisma.service";
-import { CHAIN_ID } from "./constants";
+import { CHAIN_ID, DEFAULT_SEPOLIA_RPC_URL } from "./constants";
 import { EventsGateway } from "./events.gateway";
 
 export type SignerInput = {
@@ -48,9 +48,8 @@ export class AccountService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    const rpc = this.config.get<string>("SEPOLIA_RPC_URL");
+    const rpc = this.config.get<string>("SEPOLIA_RPC_URL") ?? DEFAULT_SEPOLIA_RPC_URL;
     const pk = this.config.get<string>("RELAYER_PRIVATE_KEY");
-    if (!rpc) throw new Error("SEPOLIA_RPC_URL missing");
     if (!pk) throw new Error("RELAYER_PRIVATE_KEY missing");
 
     this.provider = new JsonRpcProvider(rpc, CHAIN_ID, { staticNetwork: true, batchMaxCount: 1 });
@@ -71,7 +70,7 @@ export class AccountService implements OnModuleInit {
     }
     this.fhevm = await factory({
       ...sepoliaConfig,
-      network: this.config.get<string>("SEPOLIA_RPC_URL"),
+      network: this.config.get<string>("SEPOLIA_RPC_URL") ?? DEFAULT_SEPOLIA_RPC_URL,
     });
     return this.fhevm;
   }
@@ -93,9 +92,10 @@ export class AccountService implements OnModuleInit {
     }
 
     // 1. Deploy.
+    const hUSDAddr = getAddress(HUSD_ADDRESS);
     const factory = new ContractFactory(HIDDEN_MULTISIG_ABI as any, HIDDEN_MULTISIG_BYTECODE, this.wallet);
-    this.logger.log(`Deploying HiddenMultisig (relayer=${this.wallet.address})`);
-    const deploy = await factory.deploy(this.wallet.address);
+    this.logger.log(`Deploying HiddenMultisig (relayer=${this.wallet.address}, hUSD=${hUSDAddr})`);
+    const deploy = await factory.deploy(this.wallet.address, hUSDAddr);
     const deployTx = deploy.deploymentTransaction();
     if (!deployTx) throw new Error("deploymentTransaction unavailable");
     await deploy.waitForDeployment();

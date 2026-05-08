@@ -13,7 +13,10 @@ import "solidity-coverage";
 
 const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY ?? "";
 const SEPOLIA_RPC_URL =
-  process.env.SEPOLIA_RPC_URL ?? (ALCHEMY_API_KEY ? `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}` : "https://sepolia.drpc.org");
+  process.env.SEPOLIA_RPC_URL ??
+  (ALCHEMY_API_KEY
+    ? `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`
+    : "https://ethereum-sepolia.publicnode.com");
 const DEPLOYER_PRIVATE_KEY =
   process.env.DEPLOYER_PRIVATE_KEY ?? "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY ?? "";

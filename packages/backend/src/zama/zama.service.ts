@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleInit, BadRequestException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
+  HIDDEN_ERC20_ABI,
+  HUSD_ADDRESS,
   TX_CREATED_EVENT,
   TX_STATUS_EVENT,
   TX_VOTED_EVENT,
@@ -14,7 +16,7 @@ import {
 import { AbiCoder, Contract, JsonRpcProvider, TransactionReceipt, Wallet, getAddress } from "ethers";
 import { PrismaService } from "../database/prisma.service";
 import { HIDDEN_MULTISIG_ABI } from "./abi";
-import { CHAIN_ID, PROPOSAL_TYPES, ProposalTypeName } from "./constants";
+import { CHAIN_ID, DEFAULT_SEPOLIA_RPC_URL, PROPOSAL_TYPES, ProposalTypeName } from "./constants";
 import { EventsGateway } from "./events.gateway";
 
 const METHOD_TO_TX_TYPE: Record<string, TxType> = {
@@ -48,15 +50,16 @@ export class ZamaService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    const rpc = this.config.get<string>("SEPOLIA_RPC_URL");
+    // SEPOLIA_RPC_URL is optional — falls back to a free public node so
+    // env files only need to track secrets (RELAYER_PRIVATE_KEY).
+    const rpc = this.config.get<string>("SEPOLIA_RPC_URL") ?? DEFAULT_SEPOLIA_RPC_URL;
     const pk = this.config.get<string>("RELAYER_PRIVATE_KEY");
-    if (!rpc) throw new Error("SEPOLIA_RPC_URL missing");
     if (!pk) throw new Error("RELAYER_PRIVATE_KEY missing");
 
     this.provider = new JsonRpcProvider(rpc, CHAIN_ID, { staticNetwork: true, batchMaxCount: 1 });
     this.wallet = new Wallet(pk, this.provider);
 
-    this.logger.log(`Relayer EOA = ${this.wallet.address}`);
+    this.logger.log(`Relayer EOA = ${this.wallet.address}, RPC = ${rpc}`);
   }
 
   // ---------------------------------------------------------------------
@@ -65,6 +68,82 @@ export class ZamaService implements OnModuleInit {
 
   getRelayerInfo() {
     return { relayer: this.wallet.address, chainId: CHAIN_ID };
+  }
+
+  getHUSDAddress(): string {
+    // hUSD is a singleton deployed once on Sepolia; the address ships with
+    // the @polypay/shared package so the backend doesn't need an env var.
+    return getAddress(HUSD_ADDRESS);
+  }
+
+  /**
+   * Decrypt the hUSD balance of a holder via the relayer's FHE ACL access.
+   *
+   * HiddenERC20 grants `FHE.allow(_balances[holder], relayer)` on every
+   * balance update — that's a per-address grant for `userDecrypt`, NOT a
+   * `publicDecrypt` (which would require `FHE.makePubliclyDecryptable` and
+   * leak balances to anyone). We therefore drive the userDecrypt flow:
+   *   1. Generate an ephemeral keypair via the relayer SDK.
+   *   2. Build the KMS EIP-712 message (publicKey, contractAddresses,
+   *      validity window).
+   *   3. Sign it with the relayer's wallet.
+   *   4. Call userDecrypt — gateway returns plaintext only because the
+   *      relayer's address is in the handle's ACL.
+   */
+  async getHUSDBalance(holder: string): Promise<{ balance: string }> {
+    const hUSDAddr = this.getHUSDAddress();
+    const c = new Contract(hUSDAddr, HIDDEN_ERC20_ABI as any, this.provider);
+    const handle: string = await c.balanceOf(getAddress(holder));
+    if (!handle || handle === "0x0000000000000000000000000000000000000000000000000000000000000000") {
+      return { balance: "0" };
+    }
+
+    const fhevm = await this.getFhevmInstance();
+    const keypair = fhevm.generateKeypair();
+    const startTimestamp = Math.floor(Date.now() / 1000);
+    const durationDays = 1;
+    const eip712 = fhevm.createEIP712(keypair.publicKey, [hUSDAddr], startTimestamp, durationDays);
+
+    // Strip EIP712Domain — ethers builds it from the domain object.
+    const types = { ...eip712.types };
+    delete (types as any).EIP712Domain;
+
+    const signature = await this.wallet.signTypedData(eip712.domain, types as any, eip712.message);
+
+    const result = await fhevm.userDecrypt(
+      [{ handle, contractAddress: hUSDAddr }],
+      keypair.privateKey,
+      keypair.publicKey,
+      signature.startsWith("0x") ? signature.slice(2) : signature,
+      [hUSDAddr],
+      this.wallet.address,
+      startTimestamp,
+      durationDays,
+    );
+
+    const plaintext = result[handle];
+    if (plaintext === undefined || plaintext === null) {
+      throw new BadRequestException("userDecrypt returned no value for handle");
+    }
+    return { balance: plaintext.toString() };
+  }
+
+  /** Build extraData for finalizeExecute on Transfer proposals. */
+  private async buildExecuteExtraData(address: string, propId: number): Promise<string> {
+    const prop = await this.getProposal(address, propId);
+    if (prop.ptype !== "Transfer") return "0x";
+    const amount = (prop.details as any)?.amount;
+    if (!amount) throw new Error("Transfer proposal missing amount");
+    const fhevm = await this.getFhevmInstance();
+    const hUSDAddr = this.getHUSDAddress();
+    const input = fhevm.createEncryptedInput(getAddress(hUSDAddr), getAddress(address));
+    input.add64(BigInt(amount));
+    const enc = await input.encrypt();
+    const handle: string =
+      typeof enc.handles[0] === "string" ? enc.handles[0] : "0x" + Buffer.from(enc.handles[0]).toString("hex");
+    const proof: string =
+      typeof enc.inputProof === "string" ? enc.inputProof : "0x" + Buffer.from(enc.inputProof).toString("hex");
+    return AbiCoder.defaultAbiCoder().encode(["bytes32", "bytes"], [handle, proof]);
   }
 
   // ---------------------------------------------------------------------
@@ -150,8 +229,8 @@ export class ZamaService implements OnModuleInit {
     try {
       switch (ptype) {
         case "Transfer": {
-          const [to, amount, token] = coder.decode(["address", "uint256", "address"], data);
-          return { to: getAddress(to), amount: amount.toString(), token: getAddress(token) };
+          const [to, amount] = coder.decode(["address", "uint64"], data);
+          return { to: getAddress(to), amount: amount.toString() };
         }
         case "SetThreshold": {
           const [newT] = coder.decode(["uint8"], data);
@@ -177,8 +256,9 @@ export class ZamaService implements OnModuleInit {
   // Writes (relayer-signed)
   // ---------------------------------------------------------------------
 
-  proposeTransfer(address: string, to: string, amount: string, token: string, creatorCommitment?: string) {
-    return this.proposeAndAutoApprove(address, "proposeTransfer", [to, amount, token], creatorCommitment);
+  proposeTransfer(address: string, to: string, amount: string, creatorCommitment?: string) {
+    // amount is uint64 in HiddenMultisig.proposeTransfer (hUSD scope).
+    return this.proposeAndAutoApprove(address, "proposeTransfer", [to, BigInt(amount)], creatorCommitment);
   }
 
   proposeSetThreshold(address: string, newThreshold: number, creatorCommitment?: string) {
@@ -390,6 +470,11 @@ export class ZamaService implements OnModuleInit {
 
   /**
    * Two-step execute: requestExecute → publicDecrypt → finalizeExecute.
+   *
+   * For Transfer proposals the relayer also encrypts the plaintext amount
+   * (stored in the proposal data) bound to (hUSD, this multisig) and packs
+   * (encAmount, inputProof) into the finalizeExecute extraData parameter
+   * so HiddenMultisig._execTransfer can hand it to hUSD.transfer.
    */
   async execute(address: string, propId: number) {
     const c = this.writeContract(address);
@@ -412,7 +497,11 @@ export class ZamaService implements OnModuleInit {
     }
     this.logger.log(`publicDecrypt(${handle}) ok`);
 
-    const finTx = await c.finalizeExecute(propId, abiEncoded, decryptionProof);
+    // Build extraData for Transfer proposals: encrypt amount fresh bound to
+    // (hUSD, multisig) so hUSD.transfer can consume it inside finalizeExecute.
+    const extraData = await this.buildExecuteExtraData(address, propId);
+
+    const finTx = await c.finalizeExecute(propId, abiEncoded, decryptionProof, extraData);
     const finReceipt = await finTx.wait();
     this.logger.log(`finalizeExecute ${address}#${propId} mined: ${finTx.hash}`);
 
@@ -489,7 +578,7 @@ export class ZamaService implements OnModuleInit {
     }
     this.fhevm = await factory({
       ...sepoliaConfig,
-      network: this.config.get<string>("SEPOLIA_RPC_URL"),
+      network: this.config.get<string>("SEPOLIA_RPC_URL") ?? DEFAULT_SEPOLIA_RPC_URL,
     });
     return this.fhevm;
   }

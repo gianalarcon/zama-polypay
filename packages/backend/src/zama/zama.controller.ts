@@ -11,11 +11,11 @@ class CreateTransferProposalDto {
   @IsEthereumAddress()
   to!: string;
 
+  /** Plaintext hUSD amount in token base units (6 decimals). Stored on
+   *  chain as plaintext in the proposal — encryption happens at execute
+   *  time when the relayer hands the value to hUSD.transfer. */
   @Matches(/^\d+$/, { message: "amount must be a positive decimal string" })
   amount!: string;
-
-  @IsEthereumAddress()
-  token!: string;
 
   @IsOptional()
   @IsString()
@@ -100,7 +100,17 @@ export class ZamaController {
 
   @Post("accounts/:address/proposals/transfer")
   proposeTransfer(@Param("address") address: string, @Body() dto: CreateTransferProposalDto) {
-    return this.svc.proposeTransfer(address, dto.to, dto.amount, dto.token, dto.creatorCommitment);
+    return this.svc.proposeTransfer(address, dto.to, dto.amount, dto.creatorCommitment);
+  }
+
+  @Get("husd/balance/:holder")
+  getHUSDBalance(@Param("holder") holder: string) {
+    return this.svc.getHUSDBalance(holder);
+  }
+
+  @Get("husd/address")
+  getHUSDAddress() {
+    return { address: this.svc.getHUSDAddress() };
   }
 
   @Post("accounts/:address/proposals/set-threshold")
