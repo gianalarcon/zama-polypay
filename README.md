@@ -88,9 +88,13 @@ yarn install
 
 ### 2. Start Postgres
 
+The compose file lives under `docker/`. From the repo root:
+
 ```bash
-docker compose up postgres -d
+docker compose -f docker/docker-compose.yml up postgres -d
 ```
+
+(Or `cd docker && docker compose up postgres -d`.)
 
 ### 3. Configure environment (only secrets)
 
@@ -109,9 +113,7 @@ The frontend has no `.env` — defaults are baked in.
 ### 4. Apply database migrations
 
 ```bash
-cd packages/backend
-yarn prisma migrate dev
-cd ../..
+yarn workspace @polypay-zama/backend prisma:migrate
 ```
 
 ### 5. (Optional) Deploy your own hUSD
