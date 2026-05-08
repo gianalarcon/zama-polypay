@@ -1,5 +1,4 @@
 import { TxType, TxStatus } from "../enums/index";
-import { Contact } from "./contact-book";
 import { Vote } from "./vote";
 
 export interface SignerData {
@@ -16,8 +15,6 @@ export interface Transaction {
   to?: string;
   value?: string;
   tokenAddress?: string;
-  contactId?: string;
-  contact?: Contact;
   accountAddress: string;
   signerData?: SignerData[] | null;
   newThreshold?: number;

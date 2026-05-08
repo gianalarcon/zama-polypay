@@ -1,165 +1,192 @@
 # Polypay-Zama
 
-A confidential multisig payroll dApp on Sepolia powered by Zama's Fully Homomorphic Encryption (FHE).
+A confidential multisig payroll demo on Sepolia, built on [Zama Protocol](https://docs.zama.org/protocol)'s Fully Homomorphic Encryption (FHE).
 
-> **Hide signers, not amounts.** Owner addresses are stored as `eaddress[]`; approvals authenticate via FHE equality; the threshold check is decided through an off-chain KMS public-decryption verified on-chain. Recipients and transfer amounts stay public for compliance.
+Two contracts compose the privacy story:
+- **HiddenMultisig** — encrypts who's in the multisig and who voted on each proposal.
+- **HiddenERC20 (hUSD)** — a confidential token where balances are encrypted on-chain.
 
-## Privacy model
+-----
+- Repo: [github.com/gianalarcon/zama-polypay](https://github.com/gianalarcon/zama-polypay)
+- Network: Sepolia (chainId `11155111`)
+- Deployed hUSD: `0xD72DD55D40289beF71a7ef309a7DDd8208809c71`
 
-| Public on Sepolia | Hidden |
+---
+
+## Privacy at a glance
+
+| What | Public on Etherscan? |
 |---|---|
-| Recipient, transfer amount, threshold value | Owner addresses (encrypted set) |
-| Relayer EOA (single submitter for every tx) | Signer EOAs (anonymous behind the relayer) |
-| Per-proposal approval attempt count | Which owner approved (encrypted bitmap) |
-| Whether threshold was met after `finalizeExecute` | True approval count (encrypted counter) |
+| Multisig contract address, signer count | Yes |
+| Recipient address of a payment | Yes |
+| **Token balance of any address (multisig or user)** | **Hidden** (encrypted handle) |
+| **Transfer amount in the hUSD `Transfer` event** | **Hidden** (event has no amount field) |
+| **Identities of signers (who's in the multisig)** | **Hidden** (encrypted owner array) |
+| **Who approved or denied a proposal** | **Hidden** (encrypted bitmap) |
+| **Approval count vs. threshold** | **Hidden** (encrypted counter; only the met-or-not boolean is published at execute time) |
+| **Demo limitation: proposal recipient + amount stored on the multisig** | **Public** — see note below |
+
+> **Demo limitation.** `HiddenMultisig.proposeTransfer(to, amount)` stores `(to, amount)` in plaintext inside the proposal so signers can review what they're voting on. Anyone can call `multisig.getProposal(propId)` and read both. The hUSD layer itself stays fully encrypted (balance + transfer event), but the multisig leaks the proposal's (to, amount) pair. To close this leak, the proposal would need to store an encrypted amount handle and signers would have to `userDecrypt` to review — out of scope for this hackathon build.
+
+---
 
 ## Architecture
 
-```
-┌──────────┐ encrypt addr (FHE)    ┌─────────┐ ethers tx     ┌────────────┐
-│ Browser  ├──────────────────────►│ Relayer │──────────────►│ Sepolia    │
-│ (FE SDK) │                       │ (NestJS)│               │ HiddenMs.. │
-└──────────┘                       └────┬────┘               └────┬───────┘
-                                        │                         │ event
-                                        │ publicDecrypt           │ FHE op
-                                        ▼                         ▼
-                                ┌──────────────┐           ┌─────────────┐
-                                │ Zama Gateway │◄──────────┤ Coprocessor │
-                                └──────┬───────┘           └─────────────┘
-                                       │ decrypt
-                                       ▼
-                                  ┌────────┐
-                                  │  KMS   │ (13 nodes, Nitro Enclaves)
-                                  └────────┘
+```mermaid
+flowchart LR
+  subgraph Browser
+    FE[Next.js frontend<br/>Wallet connect<br/>Zama relayer SDK]
+  end
+
+  subgraph Backend
+    BE[NestJS relayer<br/>Submits all on-chain txs<br/>Decrypts hUSD balances]
+  end
+
+  subgraph Sepolia
+    HM[HiddenMultisig<br/>encrypted owners + bitmap]
+    HUSD[HiddenERC20 hUSD<br/>encrypted balances]
+  end
+
+  subgraph Zama
+    GW[Gateway HTTP API]
+    KMS[KMS<br/>threshold decryption]
+  end
+
+  FE --> BE
+  BE --> HM
+  BE --> HUSD
+  HM <--> KMS
+  BE <--> GW
+  GW <--> KMS
 ```
 
-The relayer is the only EOA that submits transactions, so observers cannot link approvals to signer wallets.
+### How the pieces fit
+
+- **Identity = pseudonym, not wallet address.** A signer signs the message `Polypay-Zama identity v1` once with their wallet. The signature is hashed twice into a 20-byte commitment. The same wallet always re-derives the same commitment, so no backup is needed. The commitment is what the multisig stores (encrypted) and what the backend persists. The wallet address never leaves the browser.
+- **HiddenMultisig.** Owners are stored as `eaddress[]` (encrypted commitments). Approving submits an encrypted commitment; the contract uses `FHE.eq` against every owner and increments an encrypted `euint8` counter only on a fresh first-time match (a per-proposal `ebool[]` bitmap prevents double-counting). When the encrypted counter reaches the threshold, the contract publishes only a met-or-not boolean for KMS to decrypt.
+- **HiddenERC20 (hUSD).** Balances live as `mapping(address => euint64)`. `transfer` takes an externally-encrypted amount + ZKPoK proof. FHE arithmetic (`FHE.add` / `FHE.sub`) updates the ciphertexts on-chain. The `Transfer` event emits only `(from, to)` — no amount field at all.
+- **Relayer.** A single backend EOA submits every on-chain tx so `msg.sender` never leaks a signer's wallet. The same EOA holds an FHE ACL on every hUSD balance so the backend can decrypt and show plaintext balances to authorised users in the app.
+
+---
+
+## Setup
+
+### Prerequisites
+
+- Node.js ≥ 20.18.3
+- Yarn 3 (Berry, ships with the repo)
+- Docker + Docker Compose
+- A Sepolia wallet with ~0.1 ETH for the relayer EOA
+
+### 1. Clone and install
+
+```bash
+git clone git@github.com:gianalarcon/zama-polypay.git
+cd zama-polypay
+yarn install
+```
+
+### 2. Start Postgres
+
+```bash
+docker compose up postgres -d
+```
+
+### 3. Configure environment (only secrets)
+
+```bash
+# packages/backend/.env
+RELAYER_PRIVATE_KEY=0x<your relayer EOA>
+DATABASE_URL=postgresql://polypay:polypay@localhost:5433/polypay_zama
+
+# packages/hardhat/.env  (only if you want to deploy your own contracts)
+DEPLOYER_PRIVATE_KEY=0x<deployer key>
+RELAYER_ADDRESS=0x<same EOA as RELAYER_PRIVATE_KEY above>
+```
+
+The frontend has no `.env` — defaults are baked in.
+
+### 4. Apply database migrations
+
+```bash
+cd packages/backend
+yarn prisma migrate dev
+cd ../..
+```
+
+### 5. (Optional) Deploy your own hUSD
+
+Skip this and use the shared one (`0xD72DD55D40289beF71a7ef309a7DDd8208809c71`). To deploy fresh:
+
+```bash
+cd packages/hardhat
+yarn deploy --tags HiddenERC20 --network sepolia
+# update HUSD_ADDRESS in packages/shared/src/contracts/husd-config.ts
+yarn workspace @polypay/shared build
+```
+
+### 6. Run
+
+```bash
+# Terminal 1 — backend
+yarn workspace @polypay-zama/backend start:dev    # http://localhost:4000
+
+# Terminal 2 — frontend
+yarn workspace @polypay-zama/frontend dev         # http://localhost:3000
+```
+
+---
+
+## End-to-end demo
+
+> Easiest with two browser profiles so you can play signer A and signer B.
+
+1. Open http://localhost:3000, connect wallet (Sepolia).
+2. Click **Generate Membership ID**, sign `Polypay-Zama identity v1` in MetaMask. Your commitment lands in `localStorage`.
+3. Go to `/dashboard/new-account`, name the account, add yourself + a second signer's commitment, set threshold (e.g. 2-of-2), Create. Wait ~30–60 s for FHE encrypt + deploy + initialize.
+4. `/mint`, tab **Mint to wallet**: enter `1000`, Mint. Wallet balance card flips once the relayer can decrypt it.
+5. `/mint`, tab **Deposit to multisig**: enter `100`, Deposit. The browser FHE-encrypts the amount and your wallet signs the prepared `hUSD.transfer(multisig, encAmount, proof)` call.
+6. `/transfer`: recipient + amount, Submit Proposal. Backend submits and auto-approves on your behalf.
+7. Switch to signer B's wallet, reload, Approve the proposal. Realtime WebSocket pushes the vote — the row updates without a refetch.
+8. With the threshold met, click **Execute**. Three on-chain steps run: `requestExecute` → KMS public-decrypt → `finalizeExecute` (which dispatches `hUSD.transfer` with a freshly encrypted amount).
+9. The row flips to a **Succeed** badge linking to Etherscan.
+10. Verify on Etherscan: the hUSD `Transfer` event has no amount; balances all read as ciphertext handles. Open the multisig contract → you'll see the proposal's plaintext `(to, amount)` if you call `getProposal(propId)` (the demo limitation called out above).
+
+---
+
+## Tech stack
+
+- **Frontend**: Next.js 15, React 19, RainbowKit 2, wagmi 2, viem 2, `@zama-fhe/relayer-sdk` (web), Tailwind CSS 4, TanStack Query 5, Zustand.
+- **Backend**: NestJS 11, Prisma 5 + Postgres, ethers 6, `@zama-fhe/relayer-sdk` (node), socket.io.
+- **Contracts**: Solidity 0.8.27, `@fhevm/solidity`, Hardhat + hardhat-deploy.
+- **Network**: Sepolia (Zama Protocol's only supported testnet at time of writing).
+
+---
+
+## Limitations
+
+- **Sepolia only.** Zama FHE coprocessor + KMS aren't on mainnet yet.
+- **Recipient address stays public.** EVM transfers need a plaintext destination to update storage. Hiding the recipient too would need a stealth-address scheme — out of scope.
+- **Proposal amount + recipient are public.** Stored in plaintext on the multisig (see demo limitation above). The hUSD `Transfer` event itself stays encrypted; only the multisig's proposal record leaks.
+- **Relayer is a trusted operator.** It holds an FHE ACL on every balance, so it can decrypt any user's hUSD. Acceptable for a demo; production would split this across a multi-party operator.
+- **Latency.** Each on-chain action is bounded by a Sepolia block (~12 s) plus FHE encrypt + ZKPoK proof generation (~5–15 s). Propose → execute end-to-end is ~60–90 s.
+- **Balance read takes 2–4 s.** It does an `eth_call` to `balanceOf` plus a Zama Gateway + KMS userDecrypt round-trip.
+- **No batch transfers.** A proposal moves one recipient at a time.
+
+---
 
 ## Repo layout
 
 ```
 packages/
-  hardhat/   # HiddenMultisig.sol, deploy script, mock-FHEVM tests
-  backend/   # NestJS relayer service (single ZamaModule)
-  nextjs/    # Demo UI (single page)
-  shared/    # Legacy DTOs (kept but unused by demo)
+├── hardhat/        Solidity (HiddenMultisig.sol, HiddenERC20.sol) + deploy scripts
+├── backend/        NestJS relayer (REST + WebSocket), Prisma schema, FHE helpers
+├── nextjs/         Frontend — /dashboard, /transfer, /mint, /dashboard/new-account
+└── shared/         Cross-package types, DTOs, contract artifacts (ABI + bytecode + addresses)
 ```
 
-## Quick start
+---
 
-### 0. Prerequisites
+## Disclaimer
 
-- Node.js >= 20.18.3
-- Yarn (workspaces)
-- 0.5+ Sepolia ETH on a dedicated relayer wallet ([Alchemy faucet](https://www.alchemy.com/faucets/ethereum-sepolia), [QuickNode faucet](https://faucet.quicknode.com/ethereum/sepolia))
-
-### 1. Install
-
-```bash
-yarn install
-```
-
-### 2. Compile + test the contract
-
-```bash
-yarn workspace @polypay-zama/hardhat compile
-yarn workspace @polypay-zama/hardhat test
-```
-
-15/15 mock-FHEVM tests should pass (including the front-run guard on `initialize`).
-
-### 3. Deploy `HiddenMultisig` to Sepolia
-
-```bash
-cd packages/hardhat
-cat <<EOF > .env
-SEPOLIA_RPC_URL=https://sepolia.drpc.org
-DEPLOYER_PRIVATE_KEY=0x<funded deployer key>
-RELAYER_ADDRESS=0x<relayer EOA address>
-EOF
-
-yarn deploy:sepolia
-```
-
-The deploy script reads `RELAYER_ADDRESS` and bakes it into the immutable `relayer` field on the contract. Save the printed address — you'll need it as `MULTISIG_ADDRESS` for the backend.
-
-> ⚠️ `initialize()` is gated by `onlyRelayer`. After deploying, the relayer EOA (not the deployer) must submit the `initialize` transaction. The Next.js demo's **Initialize Multisig** form does this for you via the backend.
-
-### 4. Run the backend
-
-```bash
-cd packages/backend
-cat <<EOF > .env
-SEPOLIA_RPC_URL=https://sepolia.drpc.org
-RELAYER_PRIVATE_KEY=0x<relayer hot-wallet key>
-MULTISIG_ADDRESS=0x<deployed contract>
-PORT=4000
-API_PREFIX=api
-CORS_ORIGIN=http://localhost:3000
-EOF
-
-yarn start:dev
-```
-
-Health check: `curl http://localhost:4000/api/zama/relayer`.
-
-### 5. Run the frontend
-
-```bash
-cd packages/nextjs
-cat <<EOF > .env.local
-NEXT_PUBLIC_API_BASE_URL=http://localhost:4000/api
-NEXT_PUBLIC_SEPOLIA_RPC_URL=https://sepolia.drpc.org
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<optional walletconnect id>
-EOF
-
-yarn dev
-```
-
-Open `http://localhost:3000` and:
-
-1. Connect a Sepolia wallet (RainbowKit).
-2. Paste 5 owner addresses + threshold (e.g. 3) into the **Initialize Multisig** form. Submit.
-3. Fund the multisig contract on Sepolia with some ETH.
-4. **Propose Transfer** with recipient + wei amount + token (`0x0…0` for ETH).
-5. Switch RainbowKit account, click **Approve** as each owner. Each click encrypts the connected EOA into a fresh ciphertext bound to (multisig, relayer) and POSTs to `/api/zama/proposals/:id/approve`.
-6. After `>= threshold` distinct owners approved, click **Execute**. The relayer runs `requestExecute → publicDecrypt → finalizeExecute`. Recipient receives the transfer when the encrypted threshold check decrypts to `true`.
-
-## Scope
-
-### In
-- Single multisig contract per deployment, fixed N owners at init.
-- 4 proposal types: `Transfer`, `SetThreshold`, `AddSigner` (append-only), `RemoveSigner` (soft-delete via public `isActive[]`).
-- Tokens: native ETH and USDC (or any ERC-20).
-
-### Out
-- Batch transfers, contact book, recurring/escrow payments.
-- JWT auth (wallet-connect only).
-- Multi-chain (Sepolia only).
-- Owner array compaction (use append + soft-delete instead).
-
-## Status
-
-Hackathon MVP — not audited, not production-ready. Forked-and-stripped from `Poly-pay/polypay_app`.
-
-## Threat model
-
-The contract is intentionally minimal; the operational model assumes **trust in the relayer**. Production deployments should harden the items below.
-
-| Surface | Trust assumption today | Production hardening |
-|---|---|---|
-| `relayer` EOA | Single hot wallet, immutable. Submits every approve/propose/finalize tx. | Multi-relayer with rotation; HSM/MPC custody; replace via meta-proposal. |
-| `initialize()` | Front-run blocked: `onlyRelayer`. Only the configured relayer can register the encrypted owner set. | Same. Optionally also check that `encOwners.length` matches an off-chain attestation. |
-| `proposeXxx()` | `onlyRelayer`. Anyone can ask the relayer to propose, but the relayer signs the on-chain tx. | Add per-user rate-limits in the backend; sign user requests with EIP-712 to bind intent to wallet. |
-| `approve()` | `onlyRelayer`. Encrypted signer-address comes from FE bound to (contract, relayer). | Same. Relayer should not log encrypted inputs in plaintext logs. |
-| `requestExecute()` | `onlyRelayer`. Marks the encrypted `ready` flag publicly decryptable. | Same. The "threshold met" boolean is intentionally public after this step. |
-| `finalizeExecute()` | Permissionless. Verified entirely by `FHE.checkSignatures` against KMS signatures. | Same. KMS proof binds (handle, cleartext); replay across proposals is impossible. |
-| Coprocessor + KMS | Trust ⌈2/3⌉ honest of 5 coprocessor operators and 9-of-13 KMS nodes (AWS Nitro Enclaves). | Inherits Zama Protocol guarantees; off-chain decryption may stall — surface a UX timeout. |
-| Recipient + amount | Public on Sepolia by design. | Same. If amounts must be hidden too, switch to ConfidentialERC20 + encrypted amounts. |
-| Pending proposals | No expiry / cancel. Storage grows monotonically. | Add `expiresAt` and a `cancelProposal` meta-proposal in a future iteration. |
-
-If the relayer key is compromised, an attacker can spam proposals and front-run `finalizeExecute`, but they still need encrypted approvals from real owner EOAs to clear the threshold check. They cannot drain funds without a real-owner approval round.
-
-## License
-
-[MIT](./LICENSE).
+Hackathon code, not audited. The relayer EOA is a single point of trust. Don't use mainnet funds. Forked from the original [Polypay](https://github.com/Poly-pay/polypay_app) (zkVerify + Horizen) and rewritten for Zama Protocol.

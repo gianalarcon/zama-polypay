@@ -1,15 +1,14 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import axios from "axios";
 import Image from "next/image";
-import { ResolvedToken, ZERO_ADDRESS, parseTokenAmount } from "@polypay/shared";
-import { formatUnits, parseEther, parseUnits } from "viem";
-import { useBalance } from "wagmi";
-import { sepolia } from "wagmi/chains";
-import { TokenPillPopover } from "~~/components/popovers/TokenPillPopover";
+import { HUSD_DECIMALS, HUSD_SYMBOL } from "@polypay/shared";
+import { useQueryClient } from "@tanstack/react-query";
+import { formatUnits, parseUnits } from "viem";
 import { Spinner } from "~~/components/ui/Spinner";
-import { useNetworkTokens } from "~~/hooks/app/useNetworkTokens";
+import { transactionKeys } from "~~/hooks/api/useTransaction";
+import { useHusdBalance } from "~~/hooks/api/useHusdBalance";
 import { useZodForm } from "~~/hooks/form";
 import { TransferFormData, transferSchema } from "~~/lib/form";
 import { useAccountStore, useIdentityStore } from "~~/services/store";
@@ -20,43 +19,31 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000/
 const api = axios.create({ baseURL: API_BASE });
 
 /**
- * Polypay-Zama TransferContainer.
+ * Polypay-Zama TransferContainer (hUSD only).
  *
- * Reuses the original Polypay UI verbatim (globe backgrounds, big "TRANSFERING
- * TO ANYONE" title, TokenPillPopover, dashed divider, address input). Only
- * the submission path is swapped:
- *   - Drop the ZK proof / batch flow.
- *   - POST plaintext { to, amount, token } to
- *     /api/zama/accounts/:address/proposals/transfer; the backend submits
- *     the proposal on-chain and returns the propId.
+ * Reuses the Polypay globe + dashed divider UI but the token is fixed to
+ * the singleton hUSD (confidential ERC20). The amount stays plaintext at
+ * propose time so signers can review what they're approving — encryption
+ * happens at execute time when the relayer hands the value to hUSD.transfer
+ * via finalizeExecute extraData.
  */
 export default function TransferContainer() {
-  const { tokens, nativeEth } = useNetworkTokens();
-  const [selectedToken, setSelectedToken] = useState<ResolvedToken>(nativeEth);
-
   const { currentAccount } = useAccountStore();
   const { commitment } = useIdentityStore();
   const accountAddress = currentAccount?.address;
+  const queryClient = useQueryClient();
 
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    setSelectedToken(nativeEth);
-  }, [nativeEth]);
+  const { balance: multisigBalance, isLoading: isBalanceLoading, isPending: isBalancePending, refresh: refreshBalance, markPending } = useHusdBalance(
+    accountAddress ?? null,
+  );
 
-  const isNativeETH = selectedToken.address === nativeEth.address || selectedToken.address === ZERO_ADDRESS;
-
-  // Fetch the multisig's balance for the currently selected token. wagmi's
-  // useBalance reads ERC20 balances when `token` is passed and falls back
-  // to native ETH otherwise.
-  const balance = useBalance({
-    address: accountAddress as `0x${string}` | undefined,
-    chainId: sepolia.id,
-    token: isNativeETH ? undefined : (selectedToken.address as `0x${string}`),
-    query: { enabled: Boolean(accountAddress) },
-  });
-  const formattedBalance = balance.data
-    ? Number(formatUnits(balance.data.value, balance.data.decimals)).toFixed(4)
+  const isBalanceBusy = isBalanceLoading || isBalancePending;
+  const formattedBalance = multisigBalance
+    ? Number(formatUnits(BigInt(multisigBalance), HUSD_DECIMALS)).toLocaleString("en-US", {
+        maximumFractionDigits: 4,
+      })
     : "0";
 
   const form = useZodForm({
@@ -65,7 +52,8 @@ export default function TransferContainer() {
   });
 
   const handleMaxClick = () => {
-    form.setValue("amount", formattedBalance, { shouldValidate: true });
+    if (!multisigBalance) return;
+    form.setValue("amount", formatUnits(BigInt(multisigBalance), HUSD_DECIMALS), { shouldValidate: true });
   };
 
   const handleTransfer = async (data: TransferFormData) => {
@@ -75,17 +63,12 @@ export default function TransferContainer() {
     }
     setIsLoading(true);
     try {
-      const valueInSmallestUnit = isNativeETH
-        ? parseEther(data.amount).toString()
-        : parseTokenAmount(data.amount, selectedToken.decimals);
-      const tokenAddress = isNativeETH ? ZERO_ADDRESS : selectedToken.address;
-
+      const baseUnits = parseUnits(data.amount, HUSD_DECIMALS);
       const { data: res } = await api.post<{ propId: number; txHash: string }>(
         `/zama/accounts/${accountAddress}/proposals/transfer`,
         {
           to: data.recipient,
-          amount: valueInSmallestUnit,
-          token: tokenAddress,
+          amount: baseUnits.toString(),
           // Polypay parity: creating a proposal counts as the creator's
           // first approval. Backend will auto-approve after submitting.
           creatorCommitment: commitment ?? undefined,
@@ -101,6 +84,18 @@ export default function TransferContainer() {
         </div>,
       );
       form.reset();
+      // Invalidate the dashboard transaction list so the new proposal shows
+      // up immediately (without waiting for the WebSocket round-trip or the
+      // user to manually refresh).
+      queryClient.invalidateQueries({ queryKey: transactionKeys.all });
+      if (accountAddress) {
+        queryClient.invalidateQueries({ queryKey: transactionKeys.byAccount(accountAddress) });
+      }
+      // Proposal creation itself doesn't move funds — only an executed
+      // proposal does. Mark the multisig balance pending so the spinner
+      // appears now and clears the moment the post-execute balance lands
+      // (or the 90s safety fallback fires).
+      markPending();
     } catch (error: any) {
       notification.error(formatErrorMessage(error, "Failed to submit proposal"));
     } finally {
@@ -112,19 +107,17 @@ export default function TransferContainer() {
   const watchedAmount = form.watch("amount");
   const isAmountValid = watchedAmount !== "" && parseFloat(watchedAmount) > 0;
 
-  // Insufficient-balance gate — works for native ETH and any ERC20 the
-  // user has selected (useBalance returns ERC20 balances when `token` is
-  // passed).
-  const balanceRaw = balance.data?.value ?? 0n;
+  // Insufficient-balance gate (hUSD-only path).
+  const balanceRaw = multisigBalance ? BigInt(multisigBalance) : 0n;
   const inputRaw = (() => {
     if (!isAmountValid) return 0n;
     try {
-      return parseUnits(watchedAmount, selectedToken.decimals);
+      return parseUnits(watchedAmount, HUSD_DECIMALS);
     } catch {
       return 0n;
     }
   })();
-  const insufficientBalance = isAmountValid && Boolean(balance.data) && inputRaw > balanceRaw;
+  const insufficientBalance = isAmountValid && multisigBalance !== null && inputRaw > balanceRaw;
 
   return (
     <div className="overflow-hidden relative w-full h-full flex flex-col rounded-lg">
@@ -153,20 +146,10 @@ export default function TransferContainer() {
           </div>
         </div>
 
-        {/* Amount + token */}
+        {/* Amount */}
         <div className="flex flex-col gap-2 mt-20">
           <div className="flex gap-2 items-center justify-center w-full">
-            <TokenPillPopover
-              selectedToken={selectedToken}
-              onSelect={(tokenAddress: string) => {
-                const token = tokens.find(t => t.address === tokenAddress);
-                if (token) {
-                  setSelectedToken(token);
-                  form.setValue("amount", "0");
-                }
-              }}
-            />
-
+            <span className="text-[44px] uppercase font-semibold text-primary">{HUSD_SYMBOL}</span>
             <input
               {...form.register("amount")}
               type="text"
@@ -184,13 +167,14 @@ export default function TransferContainer() {
 
           <div className="flex items-center gap-3 text-grey-500 text-base">
             <span>Polypay account balance:</span>
-            <span className="font-semibold text-grey-700">
-              {balance.isLoading ? "..." : formattedBalance} {selectedToken.symbol}
+            <span className="font-semibold text-grey-700 flex items-center gap-2">
+              {formattedBalance} {HUSD_SYMBOL}
+              {isBalanceBusy && <Spinner />}
             </span>
             <button
               type="button"
               onClick={handleMaxClick}
-              disabled={isLoading || balance.isLoading}
+              disabled={isLoading || multisigBalance === null}
               className="bg-blue-500 text-white rounded-lg px-3 py-1 font-medium text-sm disabled:opacity-50 cursor-pointer"
             >
               Max

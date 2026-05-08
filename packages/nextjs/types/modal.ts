@@ -20,18 +20,10 @@ export type ModalName =
   | "confirm"
   | "editAccount"
   | "developingFeature"
-  | "removeBatch"
   | "createGroup"
-  | "createContact"
-  | "deleteContact"
   | "requestFeature"
   | "removeSigner"
   | "signerList"
   | "switchAccount"
   | "disclaimer"
-  // Quest + Leaderboard hidden — modal names retained as comments for future restore.
-  // | "claimReward"
-  // | "questIntro"
-  | "createBatchFromContacts"
-  | "depositX402"
   | "receiveMethod";

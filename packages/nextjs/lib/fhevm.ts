@@ -35,7 +35,7 @@ export async function getFhevmInstance() {
   const network =
     typeof window !== "undefined" && (window as any).ethereum
       ? (window as any).ethereum
-      : (process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL ?? "https://sepolia.drpc.org");
+      : (process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL ?? "https://ethereum-sepolia.publicnode.com");
 
   cachedInstance = await createInstance({ ...SepoliaConfig, network });
   return cachedInstance;
@@ -65,4 +65,20 @@ export async function encryptAddresses(
   for (const a of addresses) input.addAddress(getAddress(a));
   const enc = await input.encrypt();
   return { handles: enc.handles.map(toHex), proof: toHex(enc.inputProof) };
+}
+
+/**
+ * Encrypt a single uint64 amount against (contract, caller). Used for hUSD
+ * confidential transfers initiated by the connected wallet.
+ */
+export async function encryptUint64(
+  contractAddress: string,
+  callerAddress: string,
+  amount: bigint,
+): Promise<{ handle: `0x${string}`; proof: `0x${string}` }> {
+  const fhevm = await getFhevmInstance();
+  const input = fhevm.createEncryptedInput(getAddress(contractAddress), getAddress(callerAddress));
+  input.add64(amount);
+  const enc = await input.encrypt();
+  return { handle: toHex(enc.handles[0]), proof: toHex(enc.inputProof) };
 }

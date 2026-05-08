@@ -24,6 +24,12 @@ const Routes = {
     title: "Transfer",
     icon: "/sidebar/transfer.svg",
   },
+  MINT: {
+    path: "/mint",
+    name: "mint",
+    title: "Mint hUSD",
+    icon: "/sidebar/transfer.svg",
+  },
   BATCH: {
     path: "/batch",
     name: "batch",

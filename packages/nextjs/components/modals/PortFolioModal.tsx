@@ -4,17 +4,14 @@ import React from "react";
 import Image from "next/image";
 import { Button } from "../ui/button";
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "../ui/sheet";
-import { ResolvedToken, isX402SupportedChain } from "@polypay/shared";
+import { HUSD_DECIMALS, HUSD_NAME, HUSD_SYMBOL } from "@polypay/shared";
 import { Eye, EyeOff, MoveDown, MoveUp, X } from "lucide-react";
-import { Address } from "viem";
+import { Address, formatUnits } from "viem";
 import NetworkBadge from "~~/components/Common/NetworkBadge";
+import { Spinner } from "~~/components/ui/Spinner";
 import { useMetaMultiSigWallet } from "~~/hooks";
-import { useTokenPrices } from "~~/hooks/api/usePrice";
-import { useModalApp } from "~~/hooks/app/useModalApp";
-import { useNetworkTokens } from "~~/hooks/app/useNetworkTokens";
-import { usePortfolioValue } from "~~/hooks/app/usePortfolioValue";
+import { useHusdBalance } from "~~/hooks/api/useHusdBalance";
 import { useAppRouter } from "~~/hooks/app/useRouteApp";
-import { useTokenBalances } from "~~/hooks/app/useTokenBalance";
 import { useAccountStore } from "~~/services/store";
 import { getDefaultChainId } from "~~/utils/network";
 
@@ -22,74 +19,26 @@ interface PortfolioModalProps {
   children: React.ReactNode;
 }
 
-interface TokenBalanceRowProps {
-  token: ResolvedToken;
-  balance: string;
-  usdValue: number;
-  isLoading: boolean;
-  chainId?: number;
-}
-
-function TokenBalanceRow({ token, balance, usdValue, isLoading, chainId }: TokenBalanceRowProps) {
-  return (
-    <div className="flex items-center gap-3 px-5 py-4">
-      {/* Token Icon with Chain Badge */}
-      <div className="relative">
-        <Image src={token.icon} alt={token.symbol} width={40} height={40} className="rounded-full" />
-        <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full overflow-hidden border border-white bg-black">
-          <NetworkBadge chainId={chainId} size={20} />
-        </div>
-      </div>
-
-      {/* Token Info */}
-      <div className="flex-1 flex flex-col">
-        <span className="text-grey-850 text-base font-semibold leading-6">{token.symbol}</span>
-        <span className="text-grey-600 text-sm font-medium leading-5">{token.name}</span>
-      </div>
-
-      {/* Balance & USD Value */}
-      <div className="flex-1 flex flex-col items-end gap-1">
-        <span className="text-grey-850 text-base font-medium leading-6">
-          {isLoading ? "..." : `${balance} ${token.symbol}`}
-        </span>
-        <span className="text-grey-600 text-sm font-medium leading-5">
-          {isLoading
-            ? "..."
-            : `$${usdValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 export const PortfolioModal: React.FC<PortfolioModalProps> = ({ children }) => {
   const metaMultiSigWallet = useMetaMultiSigWallet();
   const router = useAppRouter();
-  const { openModal } = useModalApp();
   const [showBalance, setShowBalance] = React.useState(true);
-  const { tokens } = useNetworkTokens();
   const { currentAccount } = useAccountStore();
 
-  const { balances, isLoading: isLoadingBalances } = useTokenBalances(
-    metaMultiSigWallet?.address,
-    currentAccount?.chainId,
-  );
-  const { getPriceBySymbol, isLoading: isLoadingPrices } = useTokenPrices();
+  const husd = useHusdBalance(metaMultiSigWallet?.address ?? null);
 
-  const isLoading = isLoadingBalances || isLoadingPrices;
+  const balanceWei = husd.balance ? BigInt(husd.balance) : 0n;
+  const husdAmount = Number(formatUnits(balanceWei, HUSD_DECIMALS));
+  // hUSD is a USD-pegged demo token: 1 hUSD = $1.
+  const usdValue = husdAmount;
 
-  const { totalUsdValue, getTokenUsdValue, getTokenBalance } = usePortfolioValue(tokens, balances, getPriceBySymbol);
-
-  const toggleShowBalance = () => {
-    setShowBalance(!showBalance);
-  };
-
-  // Format total USD value
-  const formattedTotalUsd = totalUsdValue.toLocaleString("en-US", {
+  const formattedHusd = husdAmount.toLocaleString("en-US", { maximumFractionDigits: 4 });
+  const formattedTotalUsd = usdValue.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 
+  const isBusy = husd.isPending || husd.isLoading;
   const chainId = currentAccount?.chainId ?? getDefaultChainId();
 
   return (
@@ -104,7 +53,6 @@ export const PortfolioModal: React.FC<PortfolioModalProps> = ({ children }) => {
           {/* Header Card */}
           <div className="relative bg-[url('/common/bg-main.png')] bg-no-repeat bg-cover rounded-2xl overflow-hidden">
             <div className="px-5 pt-6 pb-6 relative">
-              {/* Close Button */}
               <SheetClose asChild>
                 <Button
                   size="sm"
@@ -114,25 +62,24 @@ export const PortfolioModal: React.FC<PortfolioModalProps> = ({ children }) => {
                 </Button>
               </SheetClose>
 
-              {/* Balance Label */}
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-grey-1000 text-sm font-medium leading-[22px]">Account balance</span>
-                <button onClick={toggleShowBalance} className="cursor-pointer">
+                <button onClick={() => setShowBalance(v => !v)} className="cursor-pointer">
                   {showBalance ? (
                     <Eye className="w-[14px] h-[14px] text-main-violet" />
                   ) : (
                     <EyeOff className="w-[14px] h-[14px] text-main-violet" />
                   )}
                 </button>
+                {isBusy && <Spinner />}
               </div>
 
-              {/* Total USD Value */}
               <div className="flex items-center gap-2 pt-4 mb-6">
                 {showBalance ? (
                   <>
                     <span className="text-grey-1000 text-4xl font-normal uppercase leading-9">$</span>
                     <span className="text-grey-1000 text-4xl font-medium uppercase leading-9">
-                      {isLoading ? "..." : formattedTotalUsd}
+                      {formattedTotalUsd}
                     </span>
                   </>
                 ) : (
@@ -140,41 +87,26 @@ export const PortfolioModal: React.FC<PortfolioModalProps> = ({ children }) => {
                 )}
               </div>
 
-              {/* Action Buttons */}
-              {(() => {
-                const x402Enabled =
-                  process.env.NEXT_PUBLIC_FEATURE_X402_DEPOSIT === "true" && isX402SupportedChain(chainId);
-                const btnClass =
-                  "flex-1 min-w-0 h-icon-btn px-6 py-2 gap-1 bg-[rgba(248,248,248,0.13)] hover:bg-[rgba(248,248,248,0.25)] rounded-xl border border-[rgba(255,255,255,0.25)] cursor-pointer";
-                const labelClass = "text-grey-50 text-base font-normal leading-[19px]";
-                const iconClass = "h-5 w-5 text-grey-50 shrink-0";
-                const handleReceive = () => {
-                  // On Base (with x402 flag on), show method selector first.
-                  // On Horizen (or flag off), open QR directly as before.
-                  if (x402Enabled) {
-                    openModal("receiveMethod", {
-                      multisigAddress: metaMultiSigWallet?.address as `0x${string}`,
-                      multisigChainId: chainId,
-                    });
-                  } else {
-                    openModal("qrAddressReceiver", { address: metaMultiSigWallet?.address as Address });
-                  }
-                };
-                return (
-                  <div className="flex gap-1 p-1 bg-[rgba(0,0,0,0.47)] backdrop-blur-[15px] rounded-[15px]">
-                    <SheetClose asChild>
-                      <Button className={btnClass} onClick={() => router.goToTransfer()}>
-                        <MoveUp className={iconClass} />
-                        <span className={labelClass}>Transfer</span>
-                      </Button>
-                    </SheetClose>
-                    <Button className={btnClass} onClick={handleReceive}>
-                      <MoveDown className={iconClass} />
-                      <span className={labelClass}>Receive</span>
-                    </Button>
-                  </div>
-                );
-              })()}
+              <div className="flex gap-1 p-1 bg-[rgba(0,0,0,0.47)] backdrop-blur-[15px] rounded-[15px]">
+                <SheetClose asChild>
+                  <Button
+                    className="flex-1 min-w-0 h-icon-btn px-6 py-2 gap-1 bg-[rgba(248,248,248,0.13)] hover:bg-[rgba(248,248,248,0.25)] rounded-xl border border-[rgba(255,255,255,0.25)] cursor-pointer"
+                    onClick={() => router.goToTransfer()}
+                  >
+                    <MoveUp className="h-5 w-5 text-grey-50 shrink-0" />
+                    <span className="text-grey-50 text-base font-normal leading-[19px]">Transfer</span>
+                  </Button>
+                </SheetClose>
+                <SheetClose asChild>
+                  <Button
+                    className="flex-1 min-w-0 h-icon-btn px-6 py-2 gap-1 bg-[rgba(248,248,248,0.13)] hover:bg-[rgba(248,248,248,0.25)] rounded-xl border border-[rgba(255,255,255,0.25)] cursor-pointer"
+                    onClick={() => router.push("/mint" as any)}
+                  >
+                    <MoveDown className="h-5 w-5 text-grey-50 shrink-0" />
+                    <span className="text-grey-50 text-base font-normal leading-[19px]">Mint / Deposit</span>
+                  </Button>
+                </SheetClose>
+              </div>
             </div>
           </div>
 
@@ -185,16 +117,27 @@ export const PortfolioModal: React.FC<PortfolioModalProps> = ({ children }) => {
             </div>
 
             <div className="flex flex-col">
-              {tokens.map(token => (
-                <TokenBalanceRow
-                  key={token.address}
-                  token={token}
-                  balance={getTokenBalance(token)}
-                  usdValue={getTokenUsdValue(token)}
-                  isLoading={isLoading}
-                  chainId={chainId}
-                />
-              ))}
+              <div className="flex items-center gap-3 px-5 py-4">
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-full bg-pink-25 flex items-center justify-center">
+                    <Image src="/logo/polypay-icon.svg" alt="hUSD" width={24} height={24} />
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full overflow-hidden border border-white bg-black">
+                    <NetworkBadge chainId={chainId} size={20} />
+                  </div>
+                </div>
+                <div className="flex-1 flex flex-col">
+                  <span className="text-grey-850 text-base font-semibold leading-6">{HUSD_SYMBOL}</span>
+                  <span className="text-grey-600 text-sm font-medium leading-5">{HUSD_NAME}</span>
+                </div>
+                <div className="flex-1 flex flex-col items-end gap-1">
+                  <span className="flex items-center gap-2 text-grey-850 text-base font-medium leading-6">
+                    {formattedHusd} {HUSD_SYMBOL}
+                    {husd.isPending && <Spinner />}
+                  </span>
+                  <span className="text-grey-600 text-sm font-medium leading-5">${formattedTotalUsd}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

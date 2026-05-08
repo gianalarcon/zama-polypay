@@ -1,24 +1,27 @@
 import React from "react";
 import Image from "next/image";
 import { AddressWithContact } from "./AddressWithContact";
-import { TxType, getTokenByAddress } from "@polypay/shared";
-import { TransactionRowData, useNetworkTokens } from "~~/hooks";
-import { formatAddress, formatAmount } from "~~/utils/format";
+import { HUSD_DECIMALS, HUSD_SYMBOL, TxType } from "@polypay/shared";
+import { formatUnits } from "viem";
+import { TransactionRowData } from "~~/hooks";
+import { formatAddress } from "~~/utils/format";
+
+function formatHusdAmount(amount: string | null | undefined): string {
+  if (!amount) return `0 ${HUSD_SYMBOL}`;
+  const v = Number(formatUnits(BigInt(amount), HUSD_DECIMALS)).toLocaleString("en-US", {
+    maximumFractionDigits: 4,
+  });
+  return `${v} ${HUSD_SYMBOL}`;
+}
 
 export function TxDetails({ tx }: { tx: TransactionRowData }) {
-  const { chainId } = useNetworkTokens();
   switch (tx.type) {
     case TxType.TRANSFER:
       return (
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <Image
-              src={getTokenByAddress(tx.tokenAddress, chainId).icon}
-              alt={getTokenByAddress(tx.tokenAddress, chainId).symbol}
-              width={20}
-              height={20}
-            />
-            <span className="font-medium">{formatAmount(tx.amount ?? "0", chainId, tx.tokenAddress)}</span>
+            <Image src="/logo/polypay-icon.svg" alt={HUSD_SYMBOL} width={20} height={20} />
+            <span className="font-medium">{formatHusdAmount(tx.amount)}</span>
           </div>
           <Image src="/icons/arrows/arrow-right-long-purple.svg" alt="Arrow Right" width={100} height={100} />
           <AddressWithContact address={tx.recipientAddress ?? ""} contactName={tx.contact?.name} />

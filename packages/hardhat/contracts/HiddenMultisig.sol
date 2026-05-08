@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import { FHE, ebool, euint8, eaddress, externalEaddress } from "@fhevm/solidity/lib/FHE.sol";
+import { FHE, ebool, euint8, eaddress, euint64, externalEaddress, externalEuint64 } from "@fhevm/solidity/lib/FHE.sol";
 import { ZamaEthereumConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
+
+interface IHiddenERC20 {
+    function transfer(address to, externalEuint64 encAmount, bytes calldata inputProof) external returns (bool);
+}
 
 /// @title HiddenMultisig
 /// @notice Confidential multisig payroll: signer identities are encrypted on-chain
@@ -45,6 +49,8 @@ contract HiddenMultisig is ZamaEthereumConfig {
     uint8 public threshold;
     bool public initialized;
     address public immutable relayer;
+    /// @notice The single confidential ERC20 (hUSD) used for all transfer proposals.
+    address public immutable hUSD;
 
     mapping(uint256 => Proposal) private _proposals;
     uint256 public nextPropId;
@@ -73,9 +79,11 @@ contract HiddenMultisig is ZamaEthereumConfig {
     // Construction & initialization
     // -----------------------------------------------------------------------
 
-    constructor(address _relayer) {
+    constructor(address _relayer, address _hUSD) {
         require(_relayer != address(0), "bad relayer");
+        require(_hUSD != address(0), "bad hUSD");
         relayer = _relayer;
+        hUSD = _hUSD;
     }
 
     /// @notice One-shot initialization: register encrypted owner addresses and threshold.
@@ -106,10 +114,14 @@ contract HiddenMultisig is ZamaEthereumConfig {
     // Proposals
     // -----------------------------------------------------------------------
 
-    function proposeTransfer(address to, uint256 amount, address token) external onlyRelayer returns (uint256) {
+    /// @notice Propose a confidential hUSD transfer. Amount is plaintext at
+    ///         propose time so signers can review what they're approving;
+    ///         the actual on-chain transfer at finalizeExecute uses a fresh
+    ///         encrypted value (see _execTransfer + finalizeExecute extraData).
+    function proposeTransfer(address to, uint64 amount) external onlyRelayer returns (uint256) {
         require(to != address(0), "bad recipient");
         require(amount > 0, "bad amount");
-        bytes memory data = abi.encode(to, amount, token);
+        bytes memory data = abi.encode(to, amount);
         return _createProposal(ProposalType.Transfer, data);
     }
 
@@ -225,10 +237,14 @@ contract HiddenMultisig is ZamaEthereumConfig {
     /// @notice Finalize execution by submitting the off-chain decryption result
     ///         along with KMS signatures. checkSignatures reverts on bad proof.
     /// @param  abiEncodedCleartexts must be `abi.encode(boolReady)`
+    /// @param  extraData For Transfer proposals: `abi.encode(externalEuint64 encAmount, bytes inputProof)`
+    ///         where the relayer encrypts the proposal's plaintext amount fresh,
+    ///         bound to (hUSD, this contract). Empty for non-Transfer proposals.
     function finalizeExecute(
         uint256 propId,
         bytes calldata abiEncodedCleartexts,
-        bytes calldata decryptionProof
+        bytes calldata decryptionProof,
+        bytes calldata extraData
     ) external {
         Proposal storage p = _proposals[propId];
         require(p.decryptionPending && !p.executed, "bad state");
@@ -245,7 +261,7 @@ contract HiddenMultisig is ZamaEthereumConfig {
 
         if (ready) {
             ProposalType ptype = p.ptype;
-            if (ptype == ProposalType.Transfer) _execTransfer(p.data);
+            if (ptype == ProposalType.Transfer) _execTransfer(p.data, extraData);
             else if (ptype == ProposalType.SetThreshold) _execSetThreshold(p.data);
             else if (ptype == ProposalType.AddSigner) _execAddSigner(p.data);
             else if (ptype == ProposalType.RemoveSigner) _execRemoveSigner(p.data);
@@ -258,15 +274,11 @@ contract HiddenMultisig is ZamaEthereumConfig {
     // Internal executors
     // -----------------------------------------------------------------------
 
-    function _execTransfer(bytes memory data) internal {
-        (address to, uint256 amount, address token) = abi.decode(data, (address, uint256, address));
-        if (token == address(0)) {
-            (bool ok, ) = payable(to).call{ value: amount }("");
-            require(ok, "ETH transfer failed");
-        } else {
-            (bool ok, bytes memory ret) = token.call(abi.encodeWithSignature("transfer(address,uint256)", to, amount));
-            require(ok && (ret.length == 0 || abi.decode(ret, (bool))), "ERC20 transfer failed");
-        }
+    function _execTransfer(bytes memory data, bytes memory extraData) internal {
+        (address to, ) = abi.decode(data, (address, uint64));
+        require(extraData.length > 0, "missing encAmount/proof");
+        (externalEuint64 encAmount, bytes memory inputProof) = abi.decode(extraData, (externalEuint64, bytes));
+        require(IHiddenERC20(hUSD).transfer(to, encAmount, inputProof), "hUSD transfer failed");
     }
 
     function _execSetThreshold(bytes memory data) internal {

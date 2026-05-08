@@ -19,7 +19,6 @@ import {
 } from "@polypay/shared";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { transactionApi } from "~~/services/api";
-import { useIdentityStore } from "~~/services/store";
 
 // ============ Query Keys ============
 
@@ -53,8 +52,9 @@ export const useCreateTransaction = () => {
  * Infinite scroll hook for transactions
  */
 export const useTransactionsInfinite = (accountAddress: string, status?: TxStatus) => {
-  const { accessToken } = useIdentityStore();
-
+  // Polypay-Zama dropped JWT auth — gating on `accessToken` would keep this
+  // query permanently disabled and prevent React Query from refetching after
+  // an approve / propose action. Gate solely on the account address.
   return useInfiniteQuery({
     queryKey: status
       ? [...transactionKeys.byAccountAndStatus(accountAddress, status), "infinite"]
@@ -67,7 +67,7 @@ export const useTransactionsInfinite = (accountAddress: string, status?: TxStatu
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage: PaginatedResponse<Transaction>) =>
       lastPage.hasMore ? lastPage.nextCursor : undefined,
-    enabled: !!accessToken && !!accountAddress,
+    enabled: !!accountAddress,
   });
 };
 
@@ -161,60 +161,93 @@ export const usePendingTransactions = (accountAddress: string) => {
 };
 
 /**
- * Listen for realtime transaction updates
- * Use this in components that display transaction list
+ * Listen for realtime transaction updates and patch the React Query cache
+ * directly from the WebSocket payload — no extra refetch RTT, so the row
+ * reflects the new state the moment the event lands.
+ *
+ * - TX_VOTED_EVENT carries the full Vote record + approveCount; we splice
+ *   the vote into the matching proposal's `votes` array so myVoteStatus +
+ *   approveCount + isExecutable update in one render.
+ * - TX_STATUS_EVENT carries (status, txHash); we patch the row in-place so
+ *   the StatusBadge flips to Succeed / Denied without waiting for a list
+ *   refetch.
+ * - TX_CREATED_EVENT only carries (txId, type) — not enough to construct
+ *   a full Transaction — so we still fall back to an invalidateQueries
+ *   here. The new proposal arrives on the next refetch (typically within
+ *   one Sepolia block).
  */
 export const useTransactionRealtime = (accountAddress: string | undefined) => {
   const queryClient = useQueryClient();
 
-  // Handle new transaction created
+  const patchTransactionInCache = useCallback(
+    (txId: number, mutator: (tx: any) => any) => {
+      if (!accountAddress) return;
+      // useTransactionsInfinite stores data under
+      //   [...transactionKeys.byAccount(addr), "infinite"]
+      // and possibly the byAccountAndStatus variant. Use a partial-match
+      // query filter so both flavours get patched.
+      queryClient.setQueriesData(
+        { queryKey: transactionKeys.byAccount(accountAddress), exact: false },
+        (oldData: any) => {
+          if (!oldData?.pages) return oldData;
+          return {
+            ...oldData,
+            pages: oldData.pages.map((page: any) => ({
+              ...page,
+              data: page.data.map((tx: any) => (tx.txId === txId ? mutator(tx) : tx)),
+            })),
+          };
+        },
+      );
+    },
+    [queryClient, accountAddress],
+  );
+
   const handleTxCreated = useCallback(
     (data: TxCreatedEventData) => {
-      console.log("[Socket] TX created:", data);
-      if (accountAddress) {
-        queryClient.invalidateQueries({ queryKey: transactionKeys.byAccount(accountAddress) });
-      }
+      if (!accountAddress) return;
+      queryClient.invalidateQueries({ queryKey: transactionKeys.byAccount(accountAddress) });
     },
     [queryClient, accountAddress],
   );
 
-  // Handle transaction status change
   const handleTxStatus = useCallback(
     (data: TxStatusEventData) => {
-      console.log("[Socket] TX status:", data);
-      if (accountAddress) {
+      if (!accountAddress) return;
+      patchTransactionInCache(data.txId, tx => ({
+        ...tx,
+        status: data.status,
+        txHash: data.txHash ?? tx.txHash,
+      }));
+      if (data.status === TxStatus.EXECUTED) {
+        // Contract-derived signers / threshold may have changed if the
+        // executed proposal was AddSigner / RemoveSigner / SetThreshold.
         queryClient.invalidateQueries({
-          queryKey: transactionKeys.byAccount(accountAddress),
+          queryKey: accountContractKeys.commitments(accountAddress),
         });
-
-        // Refetch contract data when tx executed
-        if (data.status === TxStatus.EXECUTED) {
-          queryClient.invalidateQueries({
-            queryKey: accountContractKeys.commitments(accountAddress),
-          });
-          queryClient.invalidateQueries({
-            queryKey: accountContractKeys.threshold(accountAddress),
-          });
-        }
+        queryClient.invalidateQueries({
+          queryKey: accountContractKeys.threshold(accountAddress),
+        });
       }
     },
-    [queryClient, accountAddress],
+    [queryClient, accountAddress, patchTransactionInCache],
   );
 
-  // Handle transaction voted
   const handleTxVoted = useCallback(
     (data: TxVotedEventData) => {
-      console.log("[Socket] TX voted:", data);
-      if (accountAddress) {
-        queryClient.invalidateQueries({
-          queryKey: transactionKeys.byAccount(accountAddress),
+      patchTransactionInCache(data.txId, tx => {
+        const next = (tx.votes ?? []).filter((v: any) => v.voterCommitment !== data.vote.voterCommitment);
+        next.push({
+          voterCommitment: data.vote.voterCommitment,
+          voterName: data.vote.voterName,
+          voteType: data.voteType,
         });
-      }
+        return { ...tx, votes: next };
+      });
     },
-    [queryClient, accountAddress],
+    [patchTransactionInCache],
   );
 
-  // Subscribe to socket events
   useSocketEvent(TX_CREATED_EVENT, handleTxCreated);
   useSocketEvent(TX_STATUS_EVENT, handleTxStatus);
   useSocketEvent(TX_VOTED_EVENT, handleTxVoted);

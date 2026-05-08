@@ -29,16 +29,7 @@ const modals: ModalRegistry = {
   developingFeature: dynamic(() => import("./DevelopingFeatureModal"), {
     ssr: false,
   }),
-  removeBatch: dynamic(() => import("./RemoveBatchModal"), {
-    ssr: false,
-  }),
   createGroup: dynamic(() => import("./CreateGroupModal"), {
-    ssr: false,
-  }),
-  createContact: dynamic(() => import("./CreateContactModal"), {
-    ssr: false,
-  }),
-  deleteContact: dynamic(() => import("./DeleteContactModal"), {
     ssr: false,
   }),
   requestFeature: dynamic(() => import("./RequestFeatureModal"), {
@@ -52,11 +43,6 @@ const modals: ModalRegistry = {
   }),
   switchAccount: dynamic(() => import("./SwitchAccountModal"), { ssr: false }),
   disclaimer: dynamic(() => import("./DisclaimerModal"), { ssr: false }),
-  // Quest + Leaderboard hidden — modals orphaned.
-  // claimReward: dynamic(() => import("./ClaimRewardModal"), { ssr: false }),
-  // questIntro: dynamic(() => import("./QuestIntroModal"), { ssr: false }),
-  createBatchFromContacts: dynamic(() => import("./CreateBatchFromContactsModal"), { ssr: false }),
-  depositX402: dynamic(() => import("./DepositModal"), { ssr: false }),
   receiveMethod: dynamic(() => import("./ReceiveMethodModal"), { ssr: false }),
 };
 
