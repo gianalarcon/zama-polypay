@@ -170,7 +170,6 @@ yarn workspace @polypay/shared build
 7. Open signer B's browser profile, sign in, click **Dashboard** in the sidebar. Expand the proposal row and click **Approve**.
 8. Once the threshold is met, the row's button changes to **Execute**. Click it and wait ~30–60 s.
 9. The row turns green with a **Succeed** badge that links to Sepolia Etherscan.
-10. Open that Etherscan link to verify privacy: the hUSD `Transfer` event has no amount, every balance shows as a ciphertext handle.
 
 ---
 
