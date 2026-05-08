@@ -74,67 +74,85 @@ flowchart LR
 ### Prerequisites
 
 - Node.js ≥ 20.18.3
-- Yarn 3 (Berry, ships with the repo)
+- Yarn 3 (Berry, ships with the repo — nothing to install globally)
 - Docker + Docker Compose
-- A Sepolia wallet with ~0.1 ETH for the relayer EOA
+- A Sepolia wallet with ~0.1 ETH for the relayer EOA (use any [Sepolia faucet](https://sepoliafaucet.com))
 
-### 1. Clone and install
+### Copy-paste setup
+
+Run these from the repo root, top to bottom. The only manual edit is pasting your relayer private key into the backend `.env` in step 5.
 
 ```bash
+# 1. Clone
 git clone git@github.com:gianalarcon/zama-polypay.git
 cd zama-polypay
+
+# 2. Install all workspace deps
 yarn install
-```
 
-### 2. Start Postgres
+# 3. Build the @polypay/shared package
+#    (backend + frontend import compiled artifacts; required on a fresh
+#    clone because shared/dist is not committed)
+yarn workspace @polypay/shared build
 
-The compose file lives under `docker/`. From the repo root:
-
-```bash
+# 4. Start the local Postgres container
 docker compose -f docker/docker-compose.yml up postgres -d
-```
 
-(Or `cd docker && docker compose up postgres -d`.)
+# 5. Create the backend .env from the template, then paste in your key
+cp packages/backend/.env.example packages/backend/.env
+# Open packages/backend/.env and replace 0xYOUR_RELAYER_PRIVATE_KEY with
+# the private key of your funded Sepolia EOA. DATABASE_URL is already filled.
 
-### 3. Configure environment (only secrets)
-
-```bash
-# packages/backend/.env
-RELAYER_PRIVATE_KEY=0x<your relayer EOA>
-DATABASE_URL=postgresql://polypay:polypay@localhost:5433/polypay_zama
-
-# packages/hardhat/.env  (only if you want to deploy your own contracts)
-DEPLOYER_PRIVATE_KEY=0x<deployer key>
-RELAYER_ADDRESS=0x<same EOA as RELAYER_PRIVATE_KEY above>
-```
-
-The frontend has no `.env` — defaults are baked in.
-
-### 4. Apply database migrations
-
-```bash
+# 6. Apply DB migrations + generate Prisma client
+#    (`prisma migrate dev` runs `prisma generate` automatically; you only
+#    need a separate `prisma:generate` if the schema didn't change but the
+#    Prisma client did, e.g. after a `yarn install`.)
 yarn workspace @polypay-zama/backend prisma:migrate
 ```
 
-### 5. (Optional) Deploy your own hUSD
+> Frontend has no `.env` — Sepolia public RPC, hUSD address, and a demo Wallet-Connect project ID all default in code.
 
-Skip this and use the shared one (`0xD72DD55D40289beF71a7ef309a7DDd8208809c71`). To deploy fresh:
+> The deployed shared hUSD is `0xD72DD55D40289beF71a7ef309a7DDd8208809c71`; you don't need to deploy contracts to run the demo.
+
+### Run
+
+Two terminals:
 
 ```bash
-cd packages/hardhat
-yarn deploy --tags HiddenERC20 --network sepolia
-# update HUSD_ADDRESS in packages/shared/src/contracts/husd-config.ts
-yarn workspace @polypay/shared build
+# terminal 1 — backend (NestJS, http://localhost:4000)
+yarn start:backend
+
+# terminal 2 — frontend (Next.js, http://localhost:3000)
+yarn start:frontend
 ```
 
-### 6. Run
+Open `http://localhost:3000` and follow the [end-to-end demo](#end-to-end-demo) below.
+
+### Production build (optional)
+
+The dev commands above run with hot-reload. To build production bundles:
 
 ```bash
-# Terminal 1 — backend
-yarn workspace @polypay-zama/backend start:dev    # http://localhost:4000
+yarn build
+```
 
-# Terminal 2 — frontend
-yarn workspace @polypay-zama/frontend dev         # http://localhost:3000
+Builds `@polypay-zama/backend` and `@polypay-zama/frontend` into their respective `dist/` and `.next/` directories. (`@polypay/shared` was already built in step 3.)
+
+### Deploying your own contracts (optional)
+
+Skip this unless you need a fresh hUSD instance — the deployed one above is shared.
+
+```bash
+cp packages/hardhat/.env.example packages/hardhat/.env
+# Set DEPLOYER_PRIVATE_KEY (Sepolia EOA with gas) and
+# RELAYER_ADDRESS (same EOA the backend uses as RELAYER_PRIVATE_KEY).
+
+yarn compile
+yarn deploy:sepolia --tags HiddenERC20
+
+# Copy the printed address into packages/shared/src/contracts/husd-config.ts,
+# then rebuild shared so backend/frontend pick up the new address:
+yarn workspace @polypay/shared build
 ```
 
 ---
@@ -143,16 +161,15 @@ yarn workspace @polypay-zama/frontend dev         # http://localhost:3000
 
 > Easiest with two browser profiles so you can play signer A and signer B.
 
-1. Open http://localhost:3000, connect wallet (Sepolia).
-2. Click **Generate Membership ID**, sign `Polypay-Zama identity v1` in MetaMask. Your commitment lands in `localStorage`.
-3. Go to `/dashboard/new-account`, name the account, add yourself + a second signer's commitment, set threshold (e.g. 2-of-2), Create. Wait ~30–60 s for FHE encrypt + deploy + initialize.
-4. `/mint`, tab **Mint to wallet**: enter `1000`, Mint. Wallet balance card flips once the relayer can decrypt it.
-5. `/mint`, tab **Deposit to multisig**: enter `100`, Deposit. The browser FHE-encrypts the amount and your wallet signs the prepared `hUSD.transfer(multisig, encAmount, proof)` call.
-6. `/transfer`: recipient + amount, Submit Proposal. Backend submits and auto-approves on your behalf.
-7. Switch to signer B's wallet, reload, Approve the proposal. Realtime WebSocket pushes the vote — the row updates without a refetch.
-8. With the threshold met, click **Execute**. Three on-chain steps run: `requestExecute` → KMS public-decrypt → `finalizeExecute` (which dispatches `hUSD.transfer` with a freshly encrypted amount).
-9. The row flips to a **Succeed** badge linking to Etherscan.
-10. Verify on Etherscan: the hUSD `Transfer` event has no amount; balances all read as ciphertext handles. Open the multisig contract → you'll see the proposal's plaintext `(to, amount)` if you call `getProposal(propId)` (the demo limitation called out above).
+1. Open `http://localhost:3000` in your browser and connect a wallet (Sepolia network).
+2. In the sidebar's bottom card, click **Generate your membership ID** and sign the `Polypay-Zama identity v1` message in MetaMask.
+3. The app prompts you to create an account. Enter a name in step 1, then in step 2 add yourself + a second signer's commitment, pick the threshold (e.g. 2-of-2), and click **Create your account**. Wait ~30–60 s for the multisig to deploy.
+4. Click **Mint HUSD** in the left sidebar. Make sure the **Mint to wallet** tab is selected, enter `1000`, click **Mint hUSD**. Confirm in MetaMask. The wallet balance card spins, then flips to `1,000 hUSD`.
+5. Still on the Mint page, switch to the **Deposit to multisig** tab, enter `100`, click **Deposit to multisig**. Confirm in MetaMask. The multisig balance card flips to `100 hUSD` once the deposit lands.
+6. Click **Transfer** in the sidebar. Enter a recipient address + amount, click **Submit Proposal**.
+7. Open signer B's browser profile, sign in, click **Dashboard** in the sidebar. Expand the proposal row and click **Approve**.
+8. Once the threshold is met, the row's button changes to **Execute**. Click it and wait ~30–60 s.
+9. The row turns green with a **Succeed** badge that links to Sepolia Etherscan.
 
 ---
 
@@ -186,9 +203,3 @@ packages/
 ├── nextjs/         Frontend — /dashboard, /transfer, /mint, /dashboard/new-account
 └── shared/         Cross-package types, DTOs, contract artifacts (ABI + bytecode + addresses)
 ```
-
----
-
-## Disclaimer
-
-Hackathon code, not audited. The relayer EOA is a single point of trust. Don't use mainnet funds. Forked from the original [Polypay](https://github.com/Poly-pay/polypay_app) (zkVerify + Horizen) and rewritten for Zama Protocol.
