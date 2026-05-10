@@ -9,7 +9,6 @@ Two contracts compose the privacy story:
 -----
 - Repo: [github.com/gianalarcon/zama-polypay](https://github.com/gianalarcon/zama-polypay)
 - Network: Sepolia (chainId `11155111`)
-- Deployed hUSD: `0xD72DD55D40289beF71a7ef309a7DDd8208809c71`
 
 ---
 
@@ -110,9 +109,28 @@ cp packages/backend/.env.example packages/backend/.env
 yarn workspace @polypay-zama/backend prisma:migrate
 ```
 
-> Frontend has no `.env` — Sepolia public RPC, hUSD address, and a demo Wallet-Connect project ID all default in code.
+> Frontend has no `.env` — Sepolia public RPC and a demo Wallet-Connect project ID default in code.
 
-> The deployed shared hUSD is `0xD72DD55D40289beF71a7ef309a7DDd8208809c71`; you don't need to deploy contracts to run the demo.
+### Deploy your hUSD
+
+You **must** deploy your own hUSD before running the app. Why: `HiddenERC20` takes a `_relayer` address in its constructor and stores it as `immutable`. Every balance grants FHE ACL only to that address, and only the holder of its private key can decrypt. Reusing someone else's deployment would require their relayer key.
+
+```bash
+cp packages/hardhat/.env.example packages/hardhat/.env
+# In packages/hardhat/.env set:
+#   DEPLOYER_PRIVATE_KEY = a Sepolia EOA with gas (can be the same as the relayer)
+#   RELAYER_ADDRESS      = the address derived from RELAYER_PRIVATE_KEY in
+#                          packages/backend/.env (this is the alignment that matters)
+
+yarn compile
+yarn deploy:sepolia --tags HiddenERC20
+```
+
+Copy the printed address into [packages/shared/src/contracts/husd-config.ts](packages/shared/src/contracts/husd-config.ts), then rebuild shared so backend + frontend pick it up:
+
+```bash
+yarn workspace @polypay/shared build
+```
 
 ### Run
 
@@ -128,6 +146,15 @@ yarn start:frontend
 
 Open `http://localhost:3000` and follow the [end-to-end demo](#end-to-end-demo) below.
 
+> **Running on a remote VM?** The dev servers bind to `localhost` on the VM, so opening `http://localhost:3000` from your laptop won't reach them. Forward both ports over SSH instead. With `gcloud compute ssh`, append `-- -L` flags:
+>
+> ```bash
+> gcloud compute ssh <vm-name> --zone=<zone> --project=<project> \
+>   -- -L 3000:localhost:3000 -L 4000:localhost:4000
+> ```
+>
+> Keep that session open while you use the app, then browse to `http://localhost:3000` on your laptop as usual.
+
 ### Production build (optional)
 
 The dev commands above run with hot-reload. To build production bundles:
@@ -137,23 +164,6 @@ yarn build
 ```
 
 Builds `@polypay-zama/backend` and `@polypay-zama/frontend` into their respective `dist/` and `.next/` directories. (`@polypay/shared` was already built in step 3.)
-
-### Deploying your own contracts (optional)
-
-Skip this unless you need a fresh hUSD instance — the deployed one above is shared.
-
-```bash
-cp packages/hardhat/.env.example packages/hardhat/.env
-# Set DEPLOYER_PRIVATE_KEY (Sepolia EOA with gas) and
-# RELAYER_ADDRESS (same EOA the backend uses as RELAYER_PRIVATE_KEY).
-
-yarn compile
-yarn deploy:sepolia --tags HiddenERC20
-
-# Copy the printed address into packages/shared/src/contracts/husd-config.ts,
-# then rebuild shared so backend/frontend pick up the new address:
-yarn workspace @polypay/shared build
-```
 
 ---
 

@@ -6,7 +6,7 @@
  */
 
 /** Sepolia deployment of the singleton hUSD token shared across multisigs. */
-export const HUSD_ADDRESS = "0xD72DD55D40289beF71a7ef309a7DDd8208809c71" as const;
+export const HUSD_ADDRESS = "0x727b8EFc5f0F589e1059767DEBC344e21ba6aF82" as const;
 export const HUSD_DECIMALS = 6;
 export const HUSD_SYMBOL = "hUSD";
 export const HUSD_NAME = "Hidden USD";
